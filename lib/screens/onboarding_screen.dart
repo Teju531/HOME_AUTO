@@ -16,21 +16,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       desc: 'Connect all your smart home\ndevices using easiest steps\nand manage fast.',
       titleColor: Color(0xFF8A6FEA),
       bgColor: Color(0xFFECEBFF),
-      icon: Icons.phone_android,
+      imagePath: 'assets/connect.png',
     ),
     _Page(
       title: 'CONTROL',
       desc: 'Control your devices from home,\nabroad or from anywhere in the\nworld and just relax.',
       titleColor: Color(0xFFE86BC0),
       bgColor: Color(0xFFFFE8F6),
-      icon: Icons.home_outlined,
+      imagePath: 'assets/control.png',
     ),
     _Page(
       title: 'SAVE',
       desc: 'Create scenes as per your\nmood and needs, just one click\nand manage your home.',
       titleColor: Color(0xFF6B79EA),
       bgColor: Color(0xFFECEBFF),
-      icon: Icons.wb_sunny_outlined,
+      imagePath: 'assets/save.png',
     ),
   ];
 
@@ -99,8 +99,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 class _Page {
   final String title, desc;
   final Color titleColor, bgColor;
-  final IconData icon;
-  const _Page({required this.title, required this.desc, required this.titleColor, required this.bgColor, required this.icon});
+  final String imagePath;
+  const _Page({
+    required this.title,
+    required this.desc,
+    required this.titleColor,
+    required this.bgColor,
+    required this.imagePath,
+  });
 }
 
 class _PageContent extends StatelessWidget {
@@ -135,7 +141,18 @@ class _PageContent extends StatelessWidget {
                     // Blob background decorations
                     Positioned(top: 20, right: 20, child: Container(width: 30, height: 30, decoration: BoxDecoration(color: page.titleColor.withOpacity(0.3), shape: BoxShape.circle))),
                     Positioned(bottom: 30, left: 20, child: Container(width: 18, height: 18, decoration: BoxDecoration(color: const Color(0xFFFF7BAC).withOpacity(0.5), shape: BoxShape.circle))),
-                    Icon(page.icon, size: 90, color: page.titleColor.withOpacity(0.85)),
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Image.asset(
+                        page.imagePath,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) => Icon(
+                          Icons.image_not_supported_outlined,
+                          size: 80,
+                          color: page.titleColor.withOpacity(0.85),
+                        ),
+                      ),
+                    ),
                     Positioned(bottom: 12, child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), decoration: BoxDecoration(color: page.titleColor.withOpacity(0.15), borderRadius: BorderRadius.circular(12)), child: Text('IoT', style: TextStyle(color: page.titleColor, fontWeight: FontWeight.w600, fontSize: 13)))),
                   ],
                 ),

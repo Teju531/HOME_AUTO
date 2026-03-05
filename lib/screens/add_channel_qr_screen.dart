@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
 import 'qr_scanner_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class AddChannelQRScreen extends StatefulWidget {
   const AddChannelQRScreen({super.key});
@@ -164,18 +165,35 @@ class _AddChannelQRScreenState extends State<AddChannelQRScreen> {
   }
 
   void _scanQRCode() async {
-    final result = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(builder: (context) => const QRScannerScreen()),
-    );
+    // Request camera permission
+    final status = await Permission.camera.request();
     
-    if (result != null && mounted) {
-      setState(() {
-        _nameCtrl.text = result;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('QR Code scanned: $result'), backgroundColor: AppColors.green),
+    if (status.isGranted) {
+      if (!mounted) return;
+      final result = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(builder: (context) => const QRScannerScreen()),
       );
+      
+      if (result != null && mounted) {
+        setState(() {
+          _nameCtrl.text = result;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('QR Code scanned: $result'), backgroundColor: AppColors.green),
+        );
+      }
+    } else if (status.isDenied || status.isPermanentlyDenied) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Camera permission is required to scan QR codes'),
+          backgroundColor: AppColors.red,
+        ),
+      );
+      if (status.isPermanentlyDenied) {
+        openAppSettings();
+      }
     }
   }
 
