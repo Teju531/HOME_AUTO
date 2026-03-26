@@ -1,12 +1,21 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'models/app_store.dart';
+
 import 'screens/onboarding_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/forgot_password_screen.dart';
+import 'screens/add_channel_qr_screen.dart';
+import 'screens/add_channel_wifi_screen.dart';
+import 'screens/connecting_screen.dart';
+import 'screens/connection_success_screen.dart';
+import 'screens/connection_failed_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/my_channels_screen.dart';
-import 'screens/channel_home_screen.dart';
+import 'screens/channel_home_screen.dart' show ChannelHomeScreen;
 import 'screens/add_device_to_channel_screen.dart';
 import 'screens/my_devices_screen.dart';
 import 'screens/my_scenes_screen.dart';
@@ -14,10 +23,15 @@ import 'screens/manage_scene_screen.dart';
 import 'screens/users_screen.dart';
 import 'screens/user_permissions_screen.dart';
 import 'screens/my_account_screen.dart';
+import 'screens/home_setup_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  await Firebase.initializeApp().timeout(
+    const Duration(seconds: 10),
+    onTimeout: () => throw Exception('Firebase init timed out'),
+  );
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const IoTApp());
 }
 
@@ -38,34 +52,90 @@ class IoTApp extends StatelessWidget {
       ),
       builder: (context, child) {
         return MediaQuery(
-          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.0)),
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: const OnboardingScreen(),
+      home: const AuthWrapper(),
       routes: {
-        '/onboarding': (_) => const OnboardingScreen(),
-        '/login': (_) => const LoginScreen(),
-        '/signup': (_) => const SignupScreen(),
-        '/forgot': (_) => const ForgotPasswordScreen(),
-        '/check-email': (_) => const CheckEmailScreen(),
-        '/create-password': (_) => const CreateNewPasswordScreen(),
-        '/home': (_) => const HomeScreen(),
-        '/my-channels': (_) => const MyChannelsScreen(),
-        '/channel-home': (_) => const ChannelHomeScreen(),
-        '/add-channel-qr': (_) => const AddChannelWifiScreen(),
-        '/scan-channel-qr': (_) => const AddChannelQRScreen(),
-        '/add-channel-wifi': (_) => const AddChannelWifiScreen(),
-        '/connecting': (_) => const ConnectingScreen(),
+        '/onboarding':         (_) => const OnboardingScreen(),
+        '/login':              (_) => const LoginScreen(),
+        '/signup':             (_) => const SignupScreen(),
+        '/forgot':             (_) => const ForgotPasswordScreen(),
+        '/check-email':        (_) => const CheckEmailScreen(),
+        '/create-password':    (_) => const CreateNewPasswordScreen(),
+        '/home-setup':         (_) => const HomeSetupScreen(),
+        '/home':               (_) => const HomeScreen(),
+        '/my-channels':        (_) => const MyChannelsScreen(),
+        '/channel-home':       (_) => const ChannelHomeScreen(),
+        '/add-channel-qr':     (_) => const AddChannelQRScreen(),
+        '/scan-channel-qr':    (_) => const AddChannelQRScreen(),
+        '/add-channel-wifi':   (_) => const AddChannelWifiScreen(),
+        '/connecting':         (_) => const ConnectingScreen(),
         '/connection-success': (_) => const ConnectionSuccessScreen(),
-        '/connection-failed': (_) => const ConnectionFailedScreen(),
-        '/add-device': (_) => const AddDeviceToChannelScreen(),
-        '/my-devices': (_) => const MyDevicesScreen(),
-        '/my-scenes': (_) => const MyScenesScreen(),
-        '/manage-scene': (_) => const ManageSceneScreen(),
-        '/users': (_) => const UsersScreen(),
-        '/user-permissions': (_) => const UserPermissionsScreen(),
-        '/my-account': (_) => const MyAccountScreen(),
+        '/connection-failed':  (_) => const ConnectionFailedScreen(),
+        '/add-device':         (_) => const AddDeviceToChannelScreen(),
+        '/my-devices':         (_) => const MyDevicesScreen(),
+        '/my-scenes':          (_) => const MyScenesScreen(),
+        '/manage-scene':       (_) => const ManageSceneScreen(),
+        '/users':              (_) => const UsersScreen(),
+        '/user-permissions':   (_) => const UserPermissionsScreen(),
+        '/my-account':         (_) => const MyAccountScreen(),
+      },
+    );
+  }
+}
+
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  String? _activeUid;
+
+  @override
+  void dispose() {
+    AppStore.instance.stopRealtime();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasData) {
+          final uid = snapshot.data!.uid;
+          if (_activeUid != uid) {
+            _activeUid = uid;
+            AppStore.instance.loadFromFirestore().then((_) {
+              if (!mounted) return;
+              // No home yet — send to setup screen
+              if (AppStore.instance.homeId == null) {
+                Navigator.pushReplacementNamed(context, '/home-setup');
+              }
+            });
+            AppStore.instance.startRealtime(uid).catchError((e) {
+              debugPrint('Realtime MQTT start failed: $e');
+            });
+          }
+          return const HomeScreen();
+        }
+        if (_activeUid != null) {
+          _activeUid = null;
+          AppStore.instance.homeId = null;
+          AppStore.instance.stopRealtime();
+        }
+        return const OnboardingScreen();
       },
     );
   }

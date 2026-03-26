@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 
-// ─── Sign Up ──────────────────────────────────────────────────────────────────
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
   @override
@@ -10,6 +10,51 @@ class SignupScreen extends StatefulWidget {
 
 class _SignupScreenState extends State<SignupScreen> {
   bool _obscurePass = true, _obscureConfirm = true, _accepted = false;
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signup() async {
+    if (!_accepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please accept the terms and policy')),
+      );
+      return;
+    }
+    if (_passCtrl.text.trim() != _confirmCtrl.text.trim()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwords do not match')),
+      );
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailCtrl.text.trim(),
+        password: _passCtrl.text.trim(),
+      );
+      Navigator.pushReplacementNamed(context, '/home');
+    } on FirebaseAuthException catch (e) {
+      String message = 'Signup failed';
+      if (e.code == 'email-already-in-use') {
+        message = 'Email already in use';
+      } else if (e.code == 'weak-password') {
+        message = 'Password is too weak';
+      } else if (e.code == 'invalid-email') {
+        message = 'Invalid email address';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,11 +71,11 @@ class _SignupScreenState extends State<SignupScreen> {
               const SizedBox(width: 48),
             ]),
             const SizedBox(height: 20),
-            _label('Email'), _field('email@email.com', false),
+            _label('Email'), _field(_emailCtrl, 'email@email.com', false),
             const SizedBox(height: 16),
-            _label('Password'), _passField('password@123', _obscurePass, () => setState(() => _obscurePass = !_obscurePass)),
+            _label('Password'), _passField(_passCtrl, 'password@123', _obscurePass, () => setState(() => _obscurePass = !_obscurePass)),
             const SizedBox(height: 16),
-            _label('Confirm Password'), _passField('password@123', _obscureConfirm, () => setState(() => _obscureConfirm = !_obscureConfirm)),
+            _label('Confirm Password'), _passField(_confirmCtrl, 'password@123', _obscureConfirm, () => setState(() => _obscureConfirm = !_obscureConfirm)),
             const SizedBox(height: 16),
             Row(children: [
               SizedBox(width: 20, height: 20, child: Checkbox(value: _accepted, onChanged: (v) => setState(() => _accepted = v ?? false), activeColor: AppColors.primary, side: const BorderSide(color: Color(0xFF999999), width: 1.5))),
@@ -38,7 +83,7 @@ class _SignupScreenState extends State<SignupScreen> {
               const Text('I accept the policy and terms.', style: TextStyle(color: Color(0xFF888888), fontSize: 13)),
             ]),
             const SizedBox(height: 24),
-            GradientButton(text: 'Continue', onPressed: () => Navigator.pushReplacementNamed(context, '/home'), height: 52),
+            GradientButton(text: 'Continue', onPressed: _signup, height: 52),
             const SizedBox(height: 14),
             Center(child: GestureDetector(
               onTap: () => Navigator.pop(context),
@@ -54,7 +99,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Widget _label(String t) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Text(t, style: const TextStyle(color: Color(0xFF888888), fontSize: 15)));
 
-  Widget _field(String hint, bool obscure) => TextField(
+  Widget _field(TextEditingController ctrl, String hint, bool obscure) => TextField(
+    controller: ctrl,
     obscureText: obscure,
     decoration: InputDecoration(
       hintText: hint,
@@ -64,7 +110,8 @@ class _SignupScreenState extends State<SignupScreen> {
     ),
   );
 
-  Widget _passField(String hint, bool obscure, VoidCallback toggle) => TextField(
+  Widget _passField(TextEditingController ctrl, String hint, bool obscure, VoidCallback toggle) => TextField(
+    controller: ctrl,
     obscureText: obscure,
     decoration: InputDecoration(
       hintText: hint,

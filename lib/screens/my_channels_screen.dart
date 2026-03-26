@@ -62,8 +62,8 @@ class MyChannelsScreen extends StatelessWidget {
                       channel: channels[i],
                       index: i,
                       onToggle: () => store.toggleChannel(i),
-                      onManage: () => Navigator.pushNamed(context, '/channel-home'),
-                      onLongPress: () => _showActions(context, channels[i].name),
+                      onManage: () => _showActions(context, store, channels[i]),
+                      onLongPress: () => _showActions(context, store, channels[i]),
                     ),
                   ),
                 ]),
@@ -90,7 +90,7 @@ class MyChannelsScreen extends StatelessWidget {
     );
   }
 
-  void _showActions(BuildContext context, String channelName) {
+  void _showActions(BuildContext context, AppStore store, ChannelItem channel) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
@@ -99,9 +99,41 @@ class MyChannelsScreen extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _actionItem(ctx, 'Delete the channel'),
+            _actionItem(
+              ctx,
+              'Add electronic device to this channel',
+              () {
+                Navigator.pop(ctx);
+                Navigator.pushNamed(context, '/add-device', arguments: channel.name);
+              },
+            ),
             const SizedBox(height: 20),
-            _actionItem(ctx, 'Edit channel name'),
+            _actionItem(
+              ctx,
+              'Remove all electronic devices from channel',
+              () {
+                Navigator.pop(ctx);
+                _confirmRemoveAllDevices(context, store, channel.name);
+              },
+            ),
+            const SizedBox(height: 20),
+            _actionItem(
+              ctx,
+              'Delete the channel',
+              () {
+                Navigator.pop(ctx);
+                _confirmDelete(context, store, channel.name);
+              },
+            ),
+            const SizedBox(height: 20),
+            _actionItem(
+              ctx,
+              'Edit channel name',
+              () {
+                Navigator.pop(ctx);
+                _editChannelName(context, store, channel.name);
+              },
+            ),
             const SizedBox(height: 20),
             GestureDetector(onTap: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: AppColors.textPurple, fontSize: 16, fontWeight: FontWeight.w500))),
             const SizedBox(height: 8),
@@ -111,10 +143,95 @@ class MyChannelsScreen extends StatelessWidget {
     );
   }
 
-  Widget _actionItem(BuildContext ctx, String label) => GestureDetector(
-    onTap: () { Navigator.pop(ctx); },
+  Widget _actionItem(BuildContext ctx, String label, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
     child: Text(label, style: const TextStyle(color: AppColors.textPurple, fontSize: 16, fontWeight: FontWeight.w500)),
   );
+
+  Future<void> _confirmRemoveAllDevices(BuildContext context, AppStore store, String channelName) async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove All Devices'),
+        content: Text('Remove all devices from "$channelName"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+
+    if (shouldRemove != true) return;
+
+    await store.clearDevicesInChannel(channelName);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All devices removed from channel')),
+      );
+    }
+  }
+
+  Future<void> _confirmDelete(BuildContext context, AppStore store, String channelName) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Channel'),
+        content: Text('Delete "$channelName"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true) return;
+
+    await store.deleteChannel(channelName);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Channel deleted')),
+      );
+    }
+  }
+
+  Future<void> _editChannelName(BuildContext context, AppStore store, String oldName) async {
+    final ctrl = TextEditingController(text: oldName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Channel Name'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Channel name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (newName == null || newName.isEmpty || newName == oldName) return;
+
+    try {
+      await store.renameChannel(oldName, newName);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Channel name updated')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    }
+  }
 
   Widget _nb(IconData icon, Color color, VoidCallback onTap) => GestureDetector(
     onTap: onTap,

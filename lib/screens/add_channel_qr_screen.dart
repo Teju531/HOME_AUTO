@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../constants/app_constants.dart';
-import '../models/app_store.dart';
 import 'qr_scanner_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 

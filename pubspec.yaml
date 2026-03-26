@@ -13,6 +13,12 @@ dependencies:
   cupertino_icons: ^1.0.6
   mobile_scanner: ^5.2.3
   permission_handler: ^11.3.1
+  firebase_core: ^4.5.0
+  firebase_auth: ^6.2.0
+  google_sign_in: 6.2.1
+  flutter_blue_plus: ^1.32.12   # ← ADDED for BLE connectivity
+  cloud_firestore: ^6.2.0
+  mqtt_client: ^10.5.1
 
 dev_dependencies:
   flutter_test:
@@ -32,3 +38,4 @@ flutter:
   assets:
     - assets/
     - assets/logo.png
+

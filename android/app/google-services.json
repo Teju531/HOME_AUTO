@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "439739895452",
+    "project_id": "iot-home-automation-2ee40",
+    "storage_bucket": "iot-home-automation-2ee40.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:439739895452:android:beb491d06101e24e116759",
+        "android_client_info": {
+          "package_name": "com.example.home"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "439739895452-qacj1fggkj7ffuh0h2p5habktc0bnhmp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.home",
+            "certificate_hash": "0f8122dc36e1bc7ef1a79383e385e89fb2e61976"
+          }
+        },
+        {
+          "client_id": "439739895452-s2mc7kkih1o4bkt72086nj17qcj8ak3g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpyioZfpyZ2fbwskeIEbXnKJ09UzGoZpg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "439739895452-s2mc7kkih1o4bkt72086nj17qcj8ak3g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

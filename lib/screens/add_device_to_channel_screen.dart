@@ -48,8 +48,6 @@ class _AddDeviceToChannelScreenState extends State<AddDeviceToChannelScreen> {
         }
 
         final selectedChannel = channels[_selectedChannelIdx];
-        final usedPlugs = selectedChannel.devices.map((d) => d.plug).toSet();
-        final availablePlugs = List.generate(4, (i) => 'Plug ${i + 1}').where((p) => !usedPlugs.contains(p)).toList();
 
         return Scaffold(
           backgroundColor: AppColors.background,
