@@ -119,9 +119,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
             _activeUid = uid;
             AppStore.instance.loadFromFirestore().then((_) {
               if (!mounted) return;
-              // No home yet — send to setup screen
               if (AppStore.instance.homeId == null) {
                 Navigator.pushReplacementNamed(context, '/home-setup');
+              } else {
+                AppStore.instance.startScheduleChecker();
               }
             });
             AppStore.instance.startRealtime(uid).catchError((e) {
@@ -134,6 +135,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           _activeUid = null;
           AppStore.instance.homeId = null;
           AppStore.instance.stopRealtime();
+          AppStore.instance.stopScheduleChecker();
         }
         return const OnboardingScreen();
       },

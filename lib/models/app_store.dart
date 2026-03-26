@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/firestore_service.dart';
 import '../services/mqtt_service.dart';
+import '../services/ble_control_service.dart';
 
 // ─── Device Model ──────────────────────────────────────────────────────────────
 class DeviceItem {
@@ -66,13 +68,33 @@ class SceneItem {
   final int deviceCount;
   bool isOn;
   final IconData icon;
+  final List<String> deviceKeys;
+  final int timerMinutes;
+  // Schedule: startHour/startMinute to endHour/endMinute, on selected days
+  final int? scheduleStartHour;
+  final int? scheduleStartMinute;
+  final int? scheduleEndHour;
+  final int? scheduleEndMinute;
+  // days: list of 0-6 (Mon-Sun), empty = every day
+  final List<int> scheduleDays;
 
   SceneItem({
     required this.name,
     this.deviceCount = 0,
     this.isOn = false,
     this.icon = Icons.nightlight_round,
-  });
+    List<String>? deviceKeys,
+    this.timerMinutes = 0,
+    this.scheduleStartHour,
+    this.scheduleStartMinute,
+    this.scheduleEndHour,
+    this.scheduleEndMinute,
+    List<int>? scheduleDays,
+  }) : deviceKeys = deviceKeys ?? [],
+       scheduleDays = scheduleDays ?? [];
+
+  bool get hasSchedule =>
+      scheduleStartHour != null && scheduleEndHour != null;
 }
 
 // ─── Member Model ──────────────────────────────────────────────────────────────
@@ -89,11 +111,15 @@ class AppStore {
   }
   static final AppStore instance = AppStore._();
 
-  final _fs = FirestoreService.instance;
-  final _mqtt = MqttService.instance;
+  final _fs   = FirestoreService.instance;
+  final _mqtt  = MqttService.instance;
+  final _ble   = BleControlService.instance;
 
   // ── homeId — shared across all members of the same home ───────────────────
   String? homeId;
+
+  // ── Connection mode notifier — UI listens to show BLE/WiFi indicator ──────
+  final ValueNotifier<bool> isBleConnected = ValueNotifier(false);
 
   // ── ValueNotifiers (UI listens to these) ──────────────────────────────────
   final ValueNotifier<List<ChannelItem>> channels = ValueNotifier([]);
@@ -125,12 +151,28 @@ class AppStore {
   }
 
   Future<void> startRealtime(String uid) async {
-    // Use homeId as the MQTT topic namespace so all members share the same topics
     await _mqtt.connectForUser(uid, homeId: homeId);
   }
 
   Future<void> stopRealtime() async {
     await _mqtt.disconnect();
+  }
+
+  // ── BLE direct control ───────────────────────────────────────────────────────────
+  Future<bool> connectBle(dynamic device) async {
+    final ok = await _ble.connect(device);
+    isBleConnected.value = ok;
+    return ok;
+  }
+
+  Future<void> disconnectBle() async {
+    await _ble.disconnect();
+    isBleConnected.value = false;
+  }
+
+  // Refresh BLE status (call periodically or on UI focus)
+  void refreshBleStatus() {
+    isBleConnected.value = _ble.isConnected;
   }
 
   // ── Create a new home ──────────────────────────────────────────────────────
@@ -160,15 +202,28 @@ class AppStore {
   }
 
   Future<void> toggleChannel(int index) async {
-    await _ensureRealtimeConnected();
     final list = List<ChannelItem>.from(channels.value);
     final previous = list[index].isOn;
     list[index] = list[index].copyWith(isOn: !previous);
     channels.value = list;
-    final sent = await _mqtt.publishChannelCommand(
-      channelName: list[index].name,
-      isOn: list[index].isOn,
-    );
+
+    bool sent = false;
+
+    // Try BLE first (instant, local)
+    if (_ble.isConnected) {
+      sent = await _ble.sendChannelCommand(list[index].name, list[index].isOn);
+      isBleConnected.value = _ble.isConnected;
+    }
+
+    // Fall back to MQTT (remote)
+    if (!sent) {
+      await _ensureRealtimeConnected();
+      sent = await _mqtt.publishChannelCommand(
+        channelName: list[index].name,
+        isOn: list[index].isOn,
+      );
+    }
+
     if (!sent) {
       list[index] = list[index].copyWith(isOn: previous);
       channels.value = list;
@@ -211,7 +266,6 @@ class AppStore {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> toggleDevice(String channelName, int deviceIndex) async {
-    await _ensureRealtimeConnected();
     final list = List<ChannelItem>.from(channels.value);
     final ci = list.indexWhere((c) => c.name == channelName);
     if (ci == -1) return;
@@ -220,12 +274,30 @@ class AppStore {
     devices[deviceIndex] = devices[deviceIndex].copyWith(isOn: !previous);
     list[ci] = list[ci].copyWith(devices: devices);
     channels.value = list;
-    final sent = await _mqtt.publishDeviceCommand(
-      channelName: channelName,
-      deviceName: devices[deviceIndex].name,
-      plug: devices[deviceIndex].plug,
-      isOn: devices[deviceIndex].isOn,
-    );
+
+    bool sent = false;
+
+    // Try BLE first (instant, local)
+    if (_ble.isConnected) {
+      sent = await _ble.sendPlugCommand(
+        channelName,
+        devices[deviceIndex].plug,
+        devices[deviceIndex].isOn,
+      );
+      isBleConnected.value = _ble.isConnected;
+    }
+
+    // Fall back to MQTT (remote)
+    if (!sent) {
+      await _ensureRealtimeConnected();
+      sent = await _mqtt.publishDeviceCommand(
+        channelName: channelName,
+        deviceName: devices[deviceIndex].name,
+        plug: devices[deviceIndex].plug,
+        isOn: devices[deviceIndex].isOn,
+      );
+    }
+
     if (!sent) {
       devices[deviceIndex] = devices[deviceIndex].copyWith(isOn: previous);
       list[ci] = list[ci].copyWith(devices: devices);
@@ -245,6 +317,29 @@ class AppStore {
     if (homeId != null) await _fs.addDevice(homeId!, channelName, device);
   }
 
+  Future<void> deleteDevice(String channelName, DeviceItem device) async {
+    final list = List<ChannelItem>.from(channels.value);
+    final ci = list.indexWhere((c) => c.name == channelName);
+    if (ci == -1) return;
+    final devices = list[ci].devices.where((d) => !(d.name == device.name && d.plug == device.plug)).toList();
+    list[ci] = list[ci].copyWith(devices: devices);
+    channels.value = list;
+    if (homeId != null) await _fs.deleteDevice(homeId!, channelName, device);
+  }
+
+  Future<void> renameDevice(String channelName, DeviceItem device, String newName) async {
+    final list = List<ChannelItem>.from(channels.value);
+    final ci = list.indexWhere((c) => c.name == channelName);
+    if (ci == -1) return;
+    final devices = List<DeviceItem>.from(list[ci].devices);
+    final di = devices.indexWhere((d) => d.name == device.name && d.plug == device.plug);
+    if (di == -1) return;
+    devices[di] = devices[di].copyWith(name: newName);
+    list[ci] = list[ci].copyWith(devices: devices);
+    channels.value = list;
+    if (homeId != null) await _fs.renameDevice(homeId!, channelName, device, newName);
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   //  SCENE OPERATIONS
   // ══════════════════════════════════════════════════════════════════════════
@@ -254,11 +349,149 @@ class AppStore {
     if (homeId != null) await _fs.addScene(homeId!, scene);
   }
 
+  // Active scene timers: sceneName -> Timer
+  final Map<String, dynamic> _sceneTimers = {};
+  Timer? _scheduleChecker;
+
+  // Start schedule checker — call once after login
+  void startScheduleChecker() {
+    _scheduleChecker?.cancel();
+    _scheduleChecker = Timer.periodic(const Duration(minutes: 1), (_) {
+      _checkSchedules();
+    });
+    // Also check immediately
+    _checkSchedules();
+  }
+
+  void stopScheduleChecker() {
+    _scheduleChecker?.cancel();
+    _scheduleChecker = null;
+  }
+
+  void _checkSchedules() {
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    final currentDay = now.weekday - 1; // 0=Mon, 6=Sun
+
+    for (var i = 0; i < scenes.value.length; i++) {
+      final scene = scenes.value[i];
+      if (!scene.hasSchedule) continue;
+
+      // Check if today is a scheduled day (empty = every day)
+      if (scene.scheduleDays.isNotEmpty &&
+          !scene.scheduleDays.contains(currentDay)) continue;
+
+      final startMinutes = scene.scheduleStartHour! * 60 + scene.scheduleStartMinute!;
+      final endMinutes   = scene.scheduleEndHour!   * 60 + scene.scheduleEndMinute!;
+
+      final shouldBeOn = endMinutes > startMinutes
+          ? currentMinutes >= startMinutes && currentMinutes < endMinutes
+          : currentMinutes >= startMinutes || currentMinutes < endMinutes; // overnight
+
+      if (shouldBeOn && !scene.isOn) {
+        debugPrint('Schedule: turning ON scene "${scene.name}"');
+        toggleScene(i);
+      } else if (!shouldBeOn && scene.isOn) {
+        debugPrint('Schedule: turning OFF scene "${scene.name}"');
+        toggleScene(i);
+      }
+    }
+  }
+
   Future<void> toggleScene(int index) async {
     final list = List<SceneItem>.from(scenes.value);
-    list[index].isOn = !list[index].isOn;
+    final scene = list[index];
+    final newIsOn = !scene.isOn;
+    scene.isOn = newIsOn;
     scenes.value = List.from(list);
-    if (homeId != null) await _fs.updateSceneState(homeId!, list[index].name, list[index].isOn);
+    if (homeId != null) await _fs.updateSceneState(homeId!, scene.name, newIsOn);
+
+    // Collect devices to control
+    final devicesToControl = <MapEntry<String, int>>[];
+
+    if (scene.deviceKeys.isNotEmpty) {
+      for (final key in scene.deviceKeys) {
+        final parts = key.split('|||');
+        if (parts.length != 2) continue;
+        final channelName = parts[0];
+        final deviceIndex = int.tryParse(parts[1]);
+        if (deviceIndex == null) continue;
+        final ci = channels.value.indexWhere((c) => c.name == channelName);
+        if (ci == -1 || deviceIndex >= channels.value[ci].devices.length) continue;
+        devicesToControl.add(MapEntry(channelName, deviceIndex));
+      }
+    } else {
+      // No devices assigned — control all devices
+      for (final ch in channels.value) {
+        for (var i = 0; i < ch.devices.length; i++) {
+          devicesToControl.add(MapEntry(ch.name, i));
+        }
+      }
+    }
+
+    // SET each device to the scene's new state (not toggle)
+    for (final entry in devicesToControl) {
+      await _setDeviceState(entry.key, entry.value, newIsOn);
+    }
+
+    // Cancel any existing timer for this scene
+    (_sceneTimers[scene.name] as dynamic)?.cancel();
+    _sceneTimers.remove(scene.name);
+
+    // If turning ON and timer is set, schedule auto-off
+    if (newIsOn && scene.timerMinutes > 0) {
+      _sceneTimers[scene.name] = Future.delayed(
+        Duration(minutes: scene.timerMinutes),
+        () async {
+          final currentList = List<SceneItem>.from(scenes.value);
+          final idx = currentList.indexWhere((s) => s.name == scene.name);
+          if (idx != -1 && currentList[idx].isOn) {
+            await toggleScene(idx); // turn off after timer
+          }
+        },
+      );
+    }
+  }
+
+  // Set a device to a specific state (not toggle)
+  Future<void> _setDeviceState(String channelName, int deviceIndex, bool targetState) async {
+    final list = List<ChannelItem>.from(channels.value);
+    final ci = list.indexWhere((c) => c.name == channelName);
+    if (ci == -1) return;
+    final devices = List<DeviceItem>.from(list[ci].devices);
+    if (deviceIndex >= devices.length) return;
+
+    // Only send command if state needs to change
+    if (devices[deviceIndex].isOn == targetState) return;
+
+    devices[deviceIndex] = devices[deviceIndex].copyWith(isOn: targetState);
+    list[ci] = list[ci].copyWith(devices: devices);
+    channels.value = list;
+
+    bool sent = false;
+    if (_ble.isConnected) {
+      sent = await _ble.sendPlugCommand(channelName, devices[deviceIndex].plug, targetState);
+      isBleConnected.value = _ble.isConnected;
+    }
+    if (!sent) {
+      await _ensureRealtimeConnected();
+      sent = await _mqtt.publishDeviceCommand(
+        channelName: channelName,
+        deviceName: devices[deviceIndex].name,
+        plug: devices[deviceIndex].plug,
+        isOn: targetState,
+      );
+    }
+    if (!sent) {
+      // Revert on failure
+      devices[deviceIndex] = devices[deviceIndex].copyWith(isOn: !targetState);
+      list[ci] = list[ci].copyWith(devices: devices);
+      channels.value = list;
+      return;
+    }
+    if (homeId != null) {
+      await _fs.updateDeviceState(homeId!, channelName, devices[deviceIndex], targetState);
+    }
   }
 
   Future<void> deleteScene(String sceneName) async {

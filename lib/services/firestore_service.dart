@@ -213,6 +213,29 @@ class FirestoreService {
     }
   }
 
+  Future<void> deleteDevice(String homeId, String channelName, DeviceItem device) async {
+    try {
+      final devId = _deviceId(device.name, device.plug);
+      await _channelsFor(homeId).doc(channelName).collection('devices').doc(devId).delete();
+    } catch (e) {
+      debugPrint('Error deleting device: $e');
+    }
+  }
+
+  Future<void> renameDevice(String homeId, String channelName, DeviceItem oldDevice, String newName) async {
+    try {
+      final oldId = _deviceId(oldDevice.name, oldDevice.plug);
+      final newId = _deviceId(newName, oldDevice.plug);
+      final ref = _channelsFor(homeId).doc(channelName).collection('devices');
+      final data = (await ref.doc(oldId).get()).data() ?? {};
+      data['name'] = newName;
+      await ref.doc(newId).set(data);
+      if (oldId != newId) await ref.doc(oldId).delete();
+    } catch (e) {
+      debugPrint('Error renaming device: $e');
+    }
+  }
+
   Future<void> updateDeviceState(String homeId, String channelName, DeviceItem device, bool isOn) async {
     try {
       final devId = _deviceId(device.name, device.plug);

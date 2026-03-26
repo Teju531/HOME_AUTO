@@ -30,12 +30,49 @@ class _HomeScreenState extends State<HomeScreen> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
+    // Refresh BLE status every 3 seconds
+    Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _store.refreshBleStatus();
+    });
   }
 
   @override
   void dispose() {
     _clockTimer.cancel();
     super.dispose();
+  }
+
+  // ── Connect BLE for direct control only (no WiFi provisioning) ─────────────
+  Future<void> _connectBleForControl() async {
+    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
+      try { await FlutterBluePlus.turnOn(); } catch (_) {}
+      await Future.delayed(const Duration(seconds: 2));
+    }
+    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enable Bluetooth.')));
+      return;
+    }
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BleScanSheet(
+        onDeviceSelected: (device) async {
+          Navigator.pop(context);
+          setState(() => _btStatus = 'Connecting to ${device.platformName.isNotEmpty ? device.platformName : device.remoteId}…');
+          final ok = await _store.connectBle(device);
+          setState(() => _btStatus = '');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(ok ? 'Connected to ${device.platformName}' : 'Failed to connect'),
+            backgroundColor: ok ? AppColors.green : AppColors.red,
+          ));
+        },
+      ),
+    );
   }
 
   // ── STEP 1: Check permissions & BT on, then open scan sheet ─────────────────
@@ -118,7 +155,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // ── STEP 3: Navigate to WiFi screen with device + characteristic ─────────
+      // ── STEP 3: Register device for direct BLE control + navigate to WiFi screen
+      _store.connectBle(device); // non-blocking — registers for direct control
       Navigator.pushNamed(
         context,
         '/add-channel-wifi',
@@ -193,6 +231,59 @@ class _HomeScreenState extends State<HomeScreen> {
                         ]),
                       ),
                     ],
+
+                    // ── Connection mode indicator ─────────────────────────
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _store.isBleConnected,
+                      builder: (context, bleOn, _) => Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: bleOn
+                              ? AppColors.green.withOpacity(0.1)
+                              : AppColors.primary.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: bleOn ? AppColors.green : AppColors.primary,
+                          ),
+                        ),
+                        child: Row(children: [
+                          Icon(
+                            bleOn ? Icons.bluetooth_connected : Icons.wifi,
+                            color: bleOn ? AppColors.green : AppColors.primary,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            bleOn ? 'Local (Bluetooth) — instant control' : 'Remote (WiFi/MQTT) — cloud control',
+                            style: TextStyle(
+                              color: bleOn ? AppColors.green : AppColors.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (!bleOn)
+                            GestureDetector(
+                              onTap: _connectBleForControl,
+                              child: const Text('Connect BLE',
+                                  style: TextStyle(color: AppColors.primary,
+                                      fontSize: 11, fontWeight: FontWeight.w700)),
+                            ),
+                          if (bleOn)
+                            GestureDetector(
+                              onTap: () async {
+                                await _store.disconnectBle();
+                                setState(() {});
+                              },
+                              child: const Text('Disconnect',
+                                  style: TextStyle(color: AppColors.red,
+                                      fontSize: 11, fontWeight: FontWeight.w700)),
+                            ),
+                        ]),
+                      ),
+                    ),
 
                     // ── Greeting card ─────────────────────────────────────────
                     Container(
@@ -425,7 +516,14 @@ class _HomeScreenState extends State<HomeScreen> {
             const Spacer(),
             PowerButton(
                 isOn: ch.isOn,
-                onTap: () => _store.toggleChannel(idx),
+                onTap: () async {
+                  // Only toggle devices that actually exist in this channel
+                  if (ch.devices.isEmpty) return;
+                  final newState = !ch.isOn;
+                  for (var i = 0; i < ch.devices.length; i++) {
+                    await _store.toggleDevice(ch.name, i);
+                  }
+                },
                 size: 32),
           ]),
           const SizedBox(height: 6),

@@ -10,17 +10,48 @@ class ManageSceneScreen extends StatefulWidget {
 
 class _ManageSceneScreenState extends State<ManageSceneScreen> {
   final _store = AppStore.instance;
-  int _tabIndex = 0; // 0=Manual, 1=Timer, 2=Schedule
+  int _tabIndex = 0;
   final _nameCtrl = TextEditingController();
-  String? _selectedTime;
+  int _timerMinutes = 0;
   int _selectedChannelIdx = 0;
-  final Map<String, Map<String, Map<int, bool>>> _deviceSelections = {};
+  final Map<String, bool> _deviceSelections = {};
   bool _scheduleByTime = true;
-  bool _sunriseToSunset = false;
-  bool _sunsetToSunrise = false;
   final List<bool> _selectedDays = List.filled(7, false);
   TimeOfDay _startTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _endTime = const TimeOfDay(hour: 12, minute: 0);
+  bool _sunriseToSunset = true;
+  bool _initialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialized) return;
+    _initialized = true;
+    final sceneName = ModalRoute.of(context)?.settings.arguments as String?;
+    if (sceneName != null) {
+      _nameCtrl.text = sceneName;
+      // Pre-populate selections from existing scene
+      final scene = _store.scenes.value.firstWhere(
+        (s) => s.name == sceneName,
+        orElse: () => SceneItem(name: sceneName),
+      );
+      for (final key in scene.deviceKeys) {
+        _deviceSelections[key] = true;
+      }
+      _timerMinutes = scene.timerMinutes;
+      // Pre-populate schedule
+      if (scene.hasSchedule) {
+        _tabIndex = 2;
+        _startTime = TimeOfDay(hour: scene.scheduleStartHour!, minute: scene.scheduleStartMinute!);
+        _endTime   = TimeOfDay(hour: scene.scheduleEndHour!,   minute: scene.scheduleEndMinute!);
+        for (final d in scene.scheduleDays) {
+          if (d >= 0 && d < 7) _selectedDays[d] = true;
+        }
+      } else if (scene.timerMinutes > 0) {
+        _tabIndex = 1;
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -28,14 +59,12 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
     super.dispose();
   }
 
+  String _deviceKey(String channelName, int deviceIndex) =>
+      '$channelName|||$deviceIndex';
+
   @override
   Widget build(BuildContext context) {
-    final sceneName = ModalRoute.of(context)?.settings.arguments as String?;
-    if (sceneName != null && _nameCtrl.text.isEmpty) {
-      _nameCtrl.text = sceneName;
-    }
     final channels = _store.channels.value;
-    final allDevices = _store.allDevices;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -60,10 +89,7 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
                           Text('Manage Scene', style: TextStyle(color: AppColors.primaryDark, fontSize: 18, fontWeight: FontWeight.w700)),
                         ]),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.access_time, color: AppColors.primaryDark, size: 24),
-                        onPressed: () {},
-                      ),
+                      const SizedBox(width: 48),
                     ],
                   ),
                 ),
@@ -73,42 +99,20 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ── Summary card
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryMid,
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Row(
-                            children: [
-                              const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('Good Morning!', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
-                                SizedBox(height: 4),
-                                Text('Nitin', style: TextStyle(color: Colors.white, fontSize: 13)),
-                              ])),
-                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                const Text('Total Devices', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
-                                const SizedBox(height: 4),
-                                Text('${allDevices.length}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                              ]),
-                            ],
+                        // ── Scene name — always visible
+                        const Text('Scene Name', style: TextStyle(color: AppColors.textLight, fontSize: 13)),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: _nameCtrl,
+                          style: const TextStyle(color: AppColors.primary, fontSize: 15, fontWeight: FontWeight.w600),
+                          decoration: const InputDecoration(
+                            hintText: 'e.g. Party, Night, Morning',
+                            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
+                            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.lightGrey)),
+                            contentPadding: EdgeInsets.symmetric(vertical: 8),
                           ),
                         ),
-                        const SizedBox(height: 16),
-
-                        // ── Scene title
-                        Row(children: [
-                          const Icon(Icons.power, color: AppColors.primaryDark, size: 18),
-                          const SizedBox(width: 6),
-                          Text(_nameCtrl.text.isEmpty ? 'New Scene' : '${_nameCtrl.text} Scene',
-                              style: const TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
-                        ]),
-                        const SizedBox(height: 4),
-                        const Text('You can start the scene manually, or by scheduling it at a specific time or setting up a timer. Choose your options',
-                            style: TextStyle(color: AppColors.textLight, fontSize: 12, fontStyle: FontStyle.italic, height: 1.4)),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 20),
 
                         // ── Tab bar
                         Container(
@@ -116,33 +120,40 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
                             color: const Color(0xFFECEBFF),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Row(
-                            children: [
-                              _tabBtn('Manual', 0),
-                              _tabBtn('Timer', 1),
-                              _tabBtn('Schedule', 2),
-                            ],
-                          ),
+                          child: Row(children: [
+                            _tabBtn('Manual', 0),
+                            _tabBtn('Timer', 1),
+                            _tabBtn('Schedule', 2),
+                          ]),
                         ),
                         const SizedBox(height: 20),
 
-                        // ── Tab content
-                        if (_tabIndex == 0) _manualTab()
-                        else if (_tabIndex == 1) _timerTab()
-                        else _scheduleTab(),
+                        // ── Device selector (shown in all tabs)
+                        if (channels.isEmpty)
+                          const Text('No channels yet. Add a channel first.',
+                              style: TextStyle(color: AppColors.textLight, fontSize: 13))
+                        else
+                          _buildDeviceSelector(channels),
+
+                        const SizedBox(height: 20),
+
+                        // ── Tab-specific content
+                        if (_tabIndex == 1) _timerContent(),
+                        if (_tabIndex == 2) _scheduleContent(),
+
+                        const SizedBox(height: 20),
+                        GradientButton(text: 'Save Scene', onPressed: _saveScene),
                       ],
                     ),
                   ),
                 ),
               ],
             ),
-            // ── Bottom nav
             Positioned(
               left: 16, right: 16, bottom: 14,
               child: Row(children: [
-                _navBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-                const Spacer(),
-                _navBtn(Icons.add, AppColors.red, () {}),
+                _navBtn(Icons.home, AppColors.primaryDark,
+                    () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
               ]),
             ),
           ],
@@ -173,265 +184,22 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
     );
   }
 
-  Widget _manualTab() {
+  Widget _buildDeviceSelector(List<ChannelItem> channels) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'This is a default setting of the scene, you can anytime switch on/off your devices as per your scene from the Dashboard or My Scenes page.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textLight, fontSize: 13, height: 1.5),
-        ),
-        const SizedBox(height: 20),
-        GestureDetector(
-          onTap: () {},
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('View devices & channel in this scene',
-                  style: TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w500)),
-              SizedBox(width: 4),
-              Icon(Icons.arrow_forward, color: AppColors.primary, size: 16),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        _buildDeviceSelector(),
-        const SizedBox(height: 20),
-        GradientButton(text: 'Save', onPressed: _saveScene),
-      ],
-    );
-  }
-
-  Widget _timerTab() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'You can choose the time for the scene to be active by setting the time below.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textLight, fontSize: 13, height: 1.5),
-        ),
-        const SizedBox(height: 20),
-        GestureDetector(
-          onTap: () {},
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('View devices & channel in this scene', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-              SizedBox(width: 4),
-              Icon(Icons.arrow_forward, color: AppColors.primary, size: 16),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        Center(
-          child: Text('Set Time: ${_selectedTime ?? 'Not set'}',
-              style: const TextStyle(color: AppColors.primaryDark, fontSize: 15, fontWeight: FontWeight.w600)),
-        ),
-        const SizedBox(height: 16),
-        OutlinedButton(
-          onPressed: _showTimePicker,
-          style: OutlinedButton.styleFrom(
-            side: const BorderSide(color: AppColors.primary),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            minimumSize: const Size(double.infinity, 44),
-          ),
-          child: Text(_selectedTime == null ? 'Choose Time' : 'Change Time',
-              style: const TextStyle(color: AppColors.primary, fontSize: 14)),
-        ),
-        const SizedBox(height: 24),
-        GradientButton(text: 'Save', onPressed: _saveScene),
-      ],
-    );
-  }
-
-  Widget _scheduleTab() {
-    final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'The devices would switch on/off when selected from the Dashboard or My Scenes page for the time set below.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textLight, fontSize: 13, height: 1.5),
-        ),
-        const SizedBox(height: 16),
-        GestureDetector(
-          onTap: () {},
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('View devices & channel in this scene', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-              SizedBox(width: 4),
-              Icon(Icons.arrow_forward, color: AppColors.primary, size: 16),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        const Text('Schedule the scene based on:', style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 14),
-
-        // ── Time option
-        Row(children: [
-          Radio<bool>(value: true, groupValue: _scheduleByTime, onChanged: (v) => setState(() => _scheduleByTime = true), activeColor: AppColors.primary),
-          const Text('Time', style: TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600)),
-        ]),
-        if (_scheduleByTime) ...[
-          Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  GestureDetector(
-                    onTap: () async {
-                      final t = await showTimePicker(context: context, initialTime: _startTime);
-                      if (t != null) setState(() => _startTime = t);
-                    },
-                    child: Text('${_startTime.format(context)}', style: const TextStyle(color: AppColors.primaryDark, fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                  const Text(' to ', style: TextStyle(color: AppColors.textLight, fontSize: 13)),
-                  GestureDetector(
-                    onTap: () async {
-                      final t = await showTimePicker(context: context, initialTime: _endTime);
-                      if (t != null) setState(() => _endTime = t);
-                    },
-                    child: Text('${_endTime.format(context)}', style: const TextStyle(color: AppColors.primaryDark, fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ]),
-                const SizedBox(height: 10),
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
-                    child: const Text('Repeat daily', style: TextStyle(color: Colors.white, fontSize: 12)),
-                  ),
-                  const SizedBox(width: 8),
-                  ...List.generate(7, (i) => GestureDetector(
-                    onTap: () => setState(() => _selectedDays[i] = !_selectedDays[i]),
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 4),
-                      width: 26, height: 26,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _selectedDays[i] ? AppColors.primary : const Color(0xFFECEBFF),
-                      ),
-                      child: Center(child: Text(days[i], style: TextStyle(
-                        color: _selectedDays[i] ? Colors.white : AppColors.primaryMid, fontSize: 11, fontWeight: FontWeight.w600))),
-                    ),
-                  )),
-                ]),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 14),
-
-        // ── Day/Night option
-        Row(children: [
-          Radio<bool>(value: false, groupValue: _scheduleByTime, onChanged: (v) => setState(() => _scheduleByTime = false), activeColor: AppColors.primary),
-          const Text('Day/Night', style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w600)),
-        ]),
-        if (!_scheduleByTime) ...[
-          Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: Column(
-              children: [
-                RadioListTile<bool>(
-                  value: true, groupValue: _sunriseToSunset,
-                  onChanged: (v) => setState(() => _sunriseToSunset = true),
-                  title: const Text('Sun Rise to Sun Set', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-                  activeColor: AppColors.primary, dense: true, contentPadding: EdgeInsets.zero,
-                ),
-                RadioListTile<bool>(
-                  value: false, groupValue: _sunriseToSunset,
-                  onChanged: (v) => setState(() => _sunriseToSunset = false),
-                  title: const Text('Sun Set to Sun Rise', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-                  activeColor: AppColors.primary, dense: true, contentPadding: EdgeInsets.zero,
-                ),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(border: Border.all(color: AppColors.lightGrey), borderRadius: BorderRadius.circular(8)),
-                    child: const Text('Repeat daily', style: TextStyle(color: AppColors.textLight, fontSize: 12)),
-                  ),
-                  const SizedBox(width: 8),
-                  ...List.generate(7, (i) => Container(
-                    margin: const EdgeInsets.only(right: 4),
-                    width: 26, height: 26,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: i == 0 ? AppColors.primary : const Color(0xFFECEBFF)),
-                    child: Center(child: Text(days[i], style: TextStyle(color: i == 0 ? Colors.white : AppColors.primaryMid, fontSize: 11))),
-                  )),
-                ]),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 24),
-        GradientButton(text: 'Save', onPressed: _saveScene),
-      ],
-    );
-  }
-
-  Widget _buildDeviceSelector() {
-    final channels = _store.channels.value;
-    if (channels.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Provide Scene Name', style: TextStyle(color: AppColors.textLight, fontSize: 13)),
-        const SizedBox(height: 6),
-        Row(children: [
-          Expanded(
-            child: TextField(
-              controller: _nameCtrl,
-              style: const TextStyle(color: AppColors.primary, fontSize: 15, fontWeight: FontWeight.w600),
-              decoration: const InputDecoration(
-                hintText: 'Party',
-                border: UnderlineInputBorder(),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.lightGrey)),
-                contentPadding: EdgeInsets.symmetric(vertical: 8),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 52, height: 52,
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primary, width: 1.5)),
-            child: const Icon(Icons.celebration, color: AppColors.primary, size: 26),
-          ),
-        ]),
-        const SizedBox(height: 16),
-
-        const Text('Choose Channel', style: TextStyle(color: AppColors.textLight, fontSize: 13)),
-        const SizedBox(height: 6),
-        DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            value: _selectedChannelIdx.clamp(0, channels.length - 1),
-            isExpanded: true,
-            style: const TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600),
-            items: List.generate(channels.length, (i) => DropdownMenuItem(value: i, child: Text(channels[i].name))),
-            onChanged: (v) => setState(() => _selectedChannelIdx = v!),
-          ),
-        ),
-        const Divider(color: AppColors.lightGrey),
-        const SizedBox(height: 12),
-
-        const Text('Choose devices which you want to be part of this scene and select their on/off state.',
+        const Text('Select devices for this scene:',
+            style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('Toggle ON the devices you want this scene to control.',
             style: TextStyle(color: AppColors.textLight, fontSize: 12, fontStyle: FontStyle.italic)),
         const SizedBox(height: 12),
-
-        // ── Channel devices
-        ...channels.asMap().entries.map((e) => _channelDevicesSection(e.value, e.key)),
+        ...channels.asMap().entries.map((e) => _channelSection(e.value, e.key)),
       ],
     );
   }
 
-  Widget _channelDevicesSection(ChannelItem ch, int chIdx) {
+  Widget _channelSection(ChannelItem ch, int chIdx) {
     final isExpanded = _selectedChannelIdx == chIdx;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -446,136 +214,236 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
             dense: true,
             leading: const Icon(Icons.grid_view_rounded, color: AppColors.primaryMid, size: 18),
             title: Text(ch.name, style: const TextStyle(color: AppColors.primaryMid, fontSize: 14, fontWeight: FontWeight.w600)),
-            trailing: Icon(isExpanded ? Icons.keyboard_arrow_down : Icons.chevron_right, color: AppColors.primaryMid),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('${ch.devices.where((d) {
+                final idx = ch.devices.indexOf(d);
+                return _deviceSelections[_deviceKey(ch.name, idx)] == true;
+              }).length}/${ch.devices.length}',
+                  style: const TextStyle(color: AppColors.orange, fontSize: 11)),
+              const SizedBox(width: 4),
+              Icon(isExpanded ? Icons.keyboard_arrow_down : Icons.chevron_right, color: AppColors.primaryMid),
+            ]),
             onTap: () => setState(() => _selectedChannelIdx = isExpanded ? -1 : chIdx),
           ),
-          if (isExpanded)
-            ...ch.devices.asMap().entries.map((e) => _deviceToggleRow(e.value, chIdx, e.key)),
+          if (isExpanded) ...[
+            if (ch.devices.isEmpty)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text('No devices in this channel.', style: TextStyle(color: AppColors.textLight, fontSize: 12)),
+              )
+            else
+              ...ch.devices.asMap().entries.map((e) => _deviceRow(e.value, ch.name, e.key)),
+          ],
         ],
       ),
     );
   }
 
-  Widget _deviceToggleRow(DeviceItem d, int chIdx, int dIdx) {
-    final key = '${_store.channels.value[chIdx].name}_$dIdx';
-    final isSelected = _deviceSelections[key]?['selected']?[0] ?? false;
+  Widget _deviceRow(DeviceItem d, String channelName, int dIdx) {
+    final key = _deviceKey(channelName, dIdx);
+    final isSelected = _deviceSelections[key] ?? false;
 
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: Color(0xFFE0E0E0), width: 0.5)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(
-            dense: true,
-            leading: Icon(d.icon, color: AppColors.primaryMid, size: 18),
-            title: Row(children: [
-              Text(d.name, style: const TextStyle(color: AppColors.primaryMid, fontSize: 13, fontWeight: FontWeight.w600)),
-              const SizedBox(width: 8),
-              PlugTag(d.plug),
-            ]),
-            trailing: Switch(
-              value: isSelected,
-              onChanged: (v) => setState(() {
-                _deviceSelections[key] = {'selected': {0: v}};
-              }),
-              activeColor: AppColors.primary,
-            ),
-          ),
-          if (isSelected)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Device selected, this device will play a role in this scene.',
-                      style: TextStyle(color: AppColors.green, fontSize: 11, fontStyle: FontStyle.italic)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(children: [
-                          const Text('On during scene is running', style: TextStyle(color: AppColors.textLight, fontSize: 11)),
-                          const SizedBox(height: 6),
-                          Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle, border: Border.all(color: AppColors.green, width: 2),
-                            ),
-                            child: const Icon(Icons.power_settings_new, color: AppColors.green, size: 22),
-                          ),
-                        ]),
-                      ),
-                      Container(width: 1, height: 50, color: AppColors.lightGrey),
-                      Expanded(
-                        child: Column(children: [
-                          const Text('Off after scene is completed', style: TextStyle(color: AppColors.textLight, fontSize: 11)),
-                          const SizedBox(height: 6),
-                          Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle, border: Border.all(color: AppColors.red, width: 2),
-                            ),
-                            child: const Icon(Icons.power_settings_new, color: AppColors.red, size: 22),
-                          ),
-                        ]),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            )
-          else
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: Text('Device not selected, this device will not play any role in this scene.',
-                  style: TextStyle(color: AppColors.textLight, fontSize: 11, fontStyle: FontStyle.italic)),
-            ),
-        ],
+      child: ListTile(
+        dense: true,
+        leading: Icon(d.icon, color: isSelected ? AppColors.green : AppColors.primaryMid, size: 18),
+        title: Row(children: [
+          Text(d.name, style: TextStyle(
+              color: isSelected ? AppColors.green : AppColors.primaryMid,
+              fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 8),
+          PlugTag(d.plug),
+        ]),
+        subtitle: Text(
+          isSelected ? 'Will be turned ON when scene activates' : 'Not included in scene',
+          style: TextStyle(
+              color: isSelected ? AppColors.green : AppColors.textLight,
+              fontSize: 10, fontStyle: FontStyle.italic),
+        ),
+        trailing: Switch(
+          value: isSelected,
+          onChanged: (v) => setState(() => _deviceSelections[key] = v),
+          activeColor: AppColors.primary,
+        ),
       ),
     );
   }
 
-  void _showTimePicker() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
-            child: Row(children: [
-              const Text('Choose Time', style: TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
-              const Spacer(),
-              IconButton(icon: const Icon(Icons.close, color: AppColors.red), onPressed: () => Navigator.pop(context)),
-            ]),
-          ),
-          ...['1 Min', '5 Min', '10 Min', '15 Min', 'Manual'].map((t) => ListTile(
-            title: Text(t, style: const TextStyle(color: AppColors.primaryDark, fontSize: 14)),
-            onTap: () { setState(() => _selectedTime = t); Navigator.pop(context); },
-          )),
-          const SizedBox(height: 16),
+  Widget _timerContent() {
+    final options = [
+      ('1 Min', 1), ('5 Min', 5), ('10 Min', 10),
+      ('15 Min', 15), ('30 Min', 30), ('1 Hour', 60),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        const Text('Timer — auto turn OFF after:',
+            style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8, runSpacing: 8,
+          children: options.map((opt) {
+            final selected = _timerMinutes == opt.$2;
+            return GestureDetector(
+              onTap: () => setState(() => _timerMinutes = selected ? 0 : opt.$2),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.primary : const Color(0xFFECEBFF),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: selected ? AppColors.primary : AppColors.lightGrey),
+                ),
+                child: Text(opt.$1, style: TextStyle(
+                    color: selected ? Colors.white : AppColors.primaryMid,
+                    fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            );
+          }).toList(),
+        ),
+        if (_timerMinutes > 0) ...[
+          const SizedBox(height: 10),
+          Text('Devices will turn OFF automatically after $_timerMinutes minute${_timerMinutes == 1 ? '' : 's'}.',
+              style: const TextStyle(color: AppColors.green, fontSize: 12, fontStyle: FontStyle.italic)),
         ],
-      ),
+      ],
+    );
+  }
+
+  Widget _scheduleContent() {
+    final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        const Text('Schedule Settings', style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+
+        Row(children: [
+          Radio<bool>(value: true, groupValue: _scheduleByTime,
+              onChanged: (_) => setState(() => _scheduleByTime = true), activeColor: AppColors.primary),
+          const Text('By Time', style: TextStyle(color: AppColors.primaryDark, fontSize: 13)),
+          const SizedBox(width: 20),
+          Radio<bool>(value: false, groupValue: _scheduleByTime,
+              onChanged: (_) => setState(() => _scheduleByTime = false), activeColor: AppColors.primary),
+          const Text('Day/Night', style: TextStyle(color: AppColors.primaryDark, fontSize: 13)),
+        ]),
+
+        if (_scheduleByTime) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            GestureDetector(
+              onTap: () async {
+                final t = await showTimePicker(context: context, initialTime: _startTime);
+                if (t != null) setState(() => _startTime = t);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: const Color(0xFFECEBFF), borderRadius: BorderRadius.circular(8)),
+                child: Text(_startTime.format(context),
+                    style: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+              ),
+            ),
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('to', style: TextStyle(color: AppColors.textLight))),
+            GestureDetector(
+              onTap: () async {
+                final t = await showTimePicker(context: context, initialTime: _endTime);
+                if (t != null) setState(() => _endTime = t);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: const Color(0xFFECEBFF), borderRadius: BorderRadius.circular(8)),
+                child: Text(_endTime.format(context),
+                    style: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: List.generate(7, (i) => GestureDetector(
+            onTap: () => setState(() => _selectedDays[i] = !_selectedDays[i]),
+            child: Container(
+              margin: const EdgeInsets.only(right: 6),
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _selectedDays[i] ? AppColors.primary : const Color(0xFFECEBFF),
+              ),
+              child: Center(child: Text(days[i], style: TextStyle(
+                  color: _selectedDays[i] ? Colors.white : AppColors.primaryMid,
+                  fontSize: 11, fontWeight: FontWeight.w600))),
+            ),
+          ))),
+        ] else ...[
+          const SizedBox(height: 8),
+          RadioListTile<bool>(
+            value: true, groupValue: _sunriseToSunset,
+            onChanged: (v) => setState(() => _sunriseToSunset = true),
+            title: const Text('Sunrise to Sunset', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+            activeColor: AppColors.primary, dense: true, contentPadding: EdgeInsets.zero,
+          ),
+          RadioListTile<bool>(
+            value: false, groupValue: _sunriseToSunset,
+            onChanged: (v) => setState(() => _sunriseToSunset = false),
+            title: const Text('Sunset to Sunrise', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+            activeColor: AppColors.primary, dense: true, contentPadding: EdgeInsets.zero,
+          ),
+        ],
+      ],
     );
   }
 
   void _saveScene() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please provide a scene name')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please provide a scene name')));
       return;
     }
+
+    // Collect selected device keys
+    final deviceKeys = _deviceSelections.entries
+        .where((e) => e.value)
+        .map((e) => e.key)
+        .toList();
+
     final list = List<SceneItem>.from(_store.scenes.value);
     final existingIdx = list.indexWhere((s) => s.name.toLowerCase() == name.toLowerCase());
+
+    // Collect selected days
+    final selectedDayIndices = <int>[];
+    for (var i = 0; i < _selectedDays.length; i++) {
+      if (_selectedDays[i]) selectedDayIndices.add(i);
+    }
+
+    // Build schedule fields (only if Schedule tab is active)
+    final hasSchedule = _tabIndex == 2 && _scheduleByTime;
+
+    final newScene = SceneItem(
+      name: name,
+      deviceCount: deviceKeys.length,
+      isOn: existingIdx >= 0 ? list[existingIdx].isOn : false,
+      deviceKeys: deviceKeys,
+      timerMinutes: _tabIndex == 1 ? _timerMinutes : 0,
+      scheduleStartHour:   hasSchedule ? _startTime.hour   : null,
+      scheduleStartMinute: hasSchedule ? _startTime.minute : null,
+      scheduleEndHour:     hasSchedule ? _endTime.hour     : null,
+      scheduleEndMinute:   hasSchedule ? _endTime.minute   : null,
+      scheduleDays: hasSchedule ? selectedDayIndices : [],
+    );
+
     if (existingIdx == -1) {
-      list.add(SceneItem(name: name, deviceCount: _store.allDevices.length, isOn: false));
+      _store.addScene(newScene);
+    } else {
+      list[existingIdx] = newScene;
       _store.scenes.value = list;
     }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Scene saved'), backgroundColor: AppColors.green));
     Navigator.pop(context);
   }
 

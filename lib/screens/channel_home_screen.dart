@@ -233,7 +233,13 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: _DeviceRow(
                         device: e.value,
+                        channelName: ch?.name ?? _channelName,
                         onToggle: () { _store.toggleDevice(ch?.name ?? _channelName, e.key); setState(() {}); },
+                        onDelete: () async {
+                          await _store.deleteDevice(ch?.name ?? _channelName, e.value);
+                          setState(() {});
+                        },
+                        onRename: () => _renameDevice(ch?.name ?? _channelName, e.value),
                       ),
                     )),
                 ]),
@@ -251,6 +257,30 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
     );
   }
 
+  Future<void> _renameDevice(String channelName, DeviceItem device) async {
+    final ctrl = TextEditingController(text: device.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename Device'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Device name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (newName == null || newName.isEmpty || newName == device.name) return;
+    await _store.renameDevice(channelName, device, newName);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device renamed')));
+    setState(() {});
+  }
+
   Widget _nb(IconData icon, Color color, VoidCallback onTap) => GestureDetector(
     onTap: onTap,
     child: Container(width: 52, height: 52, decoration: BoxDecoration(color: color, shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 26)),
@@ -259,28 +289,92 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
 
 class _DeviceRow extends StatelessWidget {
   final DeviceItem device;
+  final String channelName;
   final VoidCallback onToggle;
-  const _DeviceRow({required this.device, required this.onToggle});
+  final VoidCallback onDelete;
+  final VoidCallback onRename;
+  const _DeviceRow({
+    required this.device,
+    required this.channelName,
+    required this.onToggle,
+    required this.onDelete,
+    required this.onRename,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 2))]),
-      child: Row(children: [
-        Icon(device.icon, color: AppColors.primaryMid, size: 26),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Text(device.name, style: const TextStyle(color: AppColors.primaryMid, fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(width: 8),
-            PlugTag(device.plug),
-          ]),
-          const SizedBox(height: 4),
-          const Text('Tap the button to on/off the device', style: TextStyle(color: AppColors.textLight, fontSize: 11, fontStyle: FontStyle.italic)),
-        ])),
-        PowerButton(isOn: device.isOn, onTap: onToggle, size: 44),
-      ]),
+    return Dismissible(
+      key: Key('${device.name}_${device.plug}'),
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Row(children: [
+          Icon(Icons.edit, color: Colors.white, size: 22),
+          SizedBox(width: 6),
+          Text('Rename', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        ]),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: AppColors.red,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          SizedBox(width: 6),
+          Icon(Icons.delete, color: Colors.white, size: 22),
+        ]),
+      ),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.endToStart) {
+          // Delete
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Delete Device'),
+              content: Text('Delete "${device.name}"?'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+              ],
+            ),
+          );
+          if (ok == true) { onDelete(); return true; }
+          return false;
+        } else {
+          // Rename — don't dismiss, just trigger rename
+          onRename();
+          return false;
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 2))],
+        ),
+        child: Row(children: [
+          Icon(device.icon, color: AppColors.primaryMid, size: 26),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(device.name, style: const TextStyle(color: AppColors.primaryMid, fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(width: 8),
+              PlugTag(device.plug),
+            ]),
+            const SizedBox(height: 4),
+            const Text('← Rename  |  Delete →', style: TextStyle(color: AppColors.textLight, fontSize: 10, fontStyle: FontStyle.italic)),
+          ])),
+          PowerButton(isOn: device.isOn, onTap: onToggle, size: 44),
+        ]),
+      ),
     );
   }
 }

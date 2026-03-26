@@ -145,34 +145,108 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(d.name, 
+                  Text(d.name,
                       style: const TextStyle(color: AppColors.primaryMid, fontSize: 14, fontWeight: FontWeight.w700),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
-                  Text('${d.channelName}(${d.plug})',
+                  Text('${d.channelName} • ${d.plug}',
                       style: const TextStyle(color: AppColors.textLight, fontSize: 10),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
             const SizedBox(width: 8),
             PowerButton(
               isOn: d.isOn,
-              size: 40,
+              size: 36,
               onTap: () {
                 final ci = channels.indexWhere((c) => c.name == d.channelName);
                 if (ci != -1) {
-                  final di = channels[ci].devices.indexWhere((dev) => dev.name == d.name && dev.plug == d.plug);
+                  final di = channels[ci].devices.indexWhere(
+                      (dev) => dev.name == d.name && dev.plug == d.plug);
                   if (di != -1) _store.toggleDevice(d.channelName, di);
                 }
               },
+            ),
+            // ⋮ options menu
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.textLight, size: 20),
+              padding: EdgeInsets.zero,
+              onSelected: (value) async {
+                if (value == 'rename') {
+                  await _renameDevice(d);
+                } else if (value == 'delete') {
+                  await _deleteDevice(d);
+                }
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: Row(children: [
+                    Icon(Icons.edit, color: AppColors.primary, size: 18),
+                    SizedBox(width: 10),
+                    Text('Rename', style: TextStyle(color: AppColors.primary)),
+                  ]),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(children: [
+                    Icon(Icons.delete_outline, color: AppColors.red, size: 18),
+                    SizedBox(width: 10),
+                    Text('Delete', style: TextStyle(color: AppColors.red)),
+                  ]),
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _renameDevice(DeviceItem d) async {
+    final ctrl = TextEditingController(text: d.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename Device'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Device name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (newName == null || newName.isEmpty || newName == d.name) return;
+    await _store.renameDevice(d.channelName, d, newName);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Device renamed')));
+  }
+
+  Future<void> _deleteDevice(DeviceItem d) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Device'),
+        content: Text('Delete "${d.name}" from ${d.channelName}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _store.deleteDevice(d.channelName, d);
   }
 
   Widget _navBtn(IconData icon, Color color, VoidCallback onTap) {

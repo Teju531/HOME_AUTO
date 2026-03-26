@@ -184,31 +184,43 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
               children: [
                 const Icon(Icons.nightlight_round, color: AppColors.primaryMid, size: 18),
                 const Spacer(),
-                PowerButton(
-                  isOn: scene.isOn,
-                  size: 36,
-                  onTap: () => _store.toggleScene(idx),
+                // Delete button
+                GestureDetector(
+                  onTap: () => _showSceneOptions(scene, idx),
+                  child: const Icon(Icons.more_vert, color: AppColors.textLight, size: 18),
                 ),
               ],
             ),
-            const SizedBox(height: 7),
-            Text(scene.name, style: const TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 6),
+            Text(scene.name,
+                style: const TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 3),
-            Text('${scene.deviceCount} Devices', style: const TextStyle(color: AppColors.orange, fontSize: 11, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 7),
-            OutlinedButton(
-              onPressed: () => Navigator.pushNamed(context, '/manage-scene', arguments: scene.name),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.primary, width: 1),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                visualDensity: VisualDensity.compact,
-                minimumSize: const Size(double.infinity, 27),
-              ),
-              child: const Row(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
-                Text('Manage ', style: TextStyle(color: AppColors.primary, fontSize: 10)),
-                Icon(Icons.settings, color: AppColors.primary, size: 11),
-              ]),
+            Text('${scene.deviceCount} Device${scene.deviceCount == 1 ? '' : 's'}${scene.timerMinutes > 0 ? ' • ${scene.timerMinutes}min timer' : ''}',
+                style: const TextStyle(color: AppColors.orange, fontSize: 11, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pushNamed(context, '/manage-scene', arguments: scene.name),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.primary, width: 1),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 27),
+                    ),
+                    child: const Text('Manage', style: TextStyle(color: AppColors.primary, fontSize: 10)),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                PowerButton(
+                  isOn: scene.isOn,
+                  size: 32,
+                  onTap: () => _store.toggleScene(idx),
+                ),
+              ],
             ),
           ],
         ),
@@ -226,12 +238,21 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
           const SizedBox(height: 8),
           Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.lightGrey, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
-          _sheetItem('Schedule the scene', () { Navigator.pop(context); Navigator.pushNamed(context, '/manage-scene', arguments: scene.name); }),
           _sheetItem('Manage the scene', () { Navigator.pop(context); Navigator.pushNamed(context, '/manage-scene', arguments: scene.name); }),
-          _sheetItem('Delete scene', () {
+          _sheetItem('Delete scene', () async {
             Navigator.pop(context);
-            final list = List<SceneItem>.from(_store.scenes.value)..removeAt(idx);
-            _store.scenes.value = list;
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Delete Scene'),
+                content: Text('Delete "${scene.name}"?'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+                ],
+              ),
+            );
+            if (ok == true) await _store.deleteScene(scene.name);
           }, isDestructive: true),
           _sheetItem('Cancel', () => Navigator.pop(context)),
           const SizedBox(height: 20),
