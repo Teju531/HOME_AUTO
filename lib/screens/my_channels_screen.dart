@@ -1,18 +1,42 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
 
-class MyChannelsScreen extends StatelessWidget {
+class MyChannelsScreen extends StatefulWidget {
   const MyChannelsScreen({super.key});
+  @override
+  State<MyChannelsScreen> createState() => _MyChannelsScreenState();
+}
+
+class _MyChannelsScreenState extends State<MyChannelsScreen> {
+  final _store = AppStore.instance;
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good Morning!';
+    if (h < 17) return 'Good Afternoon!';
+    return 'Good Evening!';
+  }
+
+  String _displayName() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.displayName != null && user!.displayName!.trim().isNotEmpty) {
+      return user.displayName!.trim();
+    }
+    final email = user?.email ?? '';
+    if (email.isEmpty) return 'User';
+    final local = email.split('@').first.trim();
+    return local.isEmpty ? 'User' : local[0].toUpperCase() + local.substring(1);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final store = AppStore.instance;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: ValueListenableBuilder<List<ChannelItem>>(
-          valueListenable: store.channels,
+          valueListenable: _store.channels,
           builder: (context, channels, _) => Stack(
             children: [
               SingleChildScrollView(
@@ -22,7 +46,7 @@ class MyChannelsScreen extends StatelessWidget {
                   Row(children: [
                     IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.primaryMid), onPressed: () => Navigator.pop(context)),
                     const Spacer(),
-                    Row(children: const [
+                    const Row(children: [
                       Icon(Icons.grid_view_rounded, color: AppColors.primaryMid, size: 22),
                       SizedBox(width: 6),
                       Text('My Channels', style: TextStyle(color: AppColors.primaryMid, fontSize: 20, fontWeight: FontWeight.w700)),
@@ -30,12 +54,20 @@ class MyChannelsScreen extends StatelessWidget {
                     const Spacer(),
                     Stack(clipBehavior: Clip.none, children: [
                       const Icon(Icons.notifications_none, color: AppColors.primaryMid, size: 26),
-                      Positioned(right: -4, top: -4, child: CircleAvatar(radius: 9, backgroundColor: const Color(0xFFE2AD73),
-                          child: Text(channels.length.toString(), style: const TextStyle(color: Colors.white, fontSize: 10)))),
+                      Positioned(right: -4, top: -4, child: CircleAvatar(
+                        radius: 9,
+                        backgroundColor: const Color(0xFFE2AD73),
+                        child: Text(channels.length.toString(), style: const TextStyle(color: Colors.white, fontSize: 10)),
+                      )),
                     ]),
                   ]),
                   const SizedBox(height: 14),
-                  SummaryCard(rightLabel: 'Total Channels', rightValue: channels.length.toString()),
+                  SummaryCard(
+                    leftLabel: _greeting(),
+                    leftValue: _displayName(),
+                    rightLabel: 'Total Channels',
+                    rightValue: channels.length.toString(),
+                  ),
                   const SizedBox(height: 20),
                   // Header row
                   Row(children: [
@@ -45,7 +77,12 @@ class MyChannelsScreen extends StatelessWidget {
                     const Spacer(),
                     OutlinedButton.icon(
                       onPressed: () => Navigator.pushNamed(context, '/add-channel-qr'),
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.textPurple, width: 1.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), visualDensity: VisualDensity.compact),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.textPurple, width: 1.5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        visualDensity: VisualDensity.compact,
+                      ),
                       icon: const Icon(Icons.add, color: AppColors.textPurple, size: 16),
                       label: const Text('Add More Channels', style: TextStyle(color: AppColors.textPurple, fontSize: 12)),
                     ),
@@ -56,14 +93,15 @@ class MyChannelsScreen extends StatelessWidget {
                   GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.75),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.75),
                     itemCount: channels.length,
                     itemBuilder: (_, i) => _ChannelCard(
                       channel: channels[i],
                       index: i,
-                      onToggle: () => store.toggleChannel(i),
-                      onManage: () => _showActions(context, store, channels[i]),
-                      onLongPress: () => _showActions(context, store, channels[i]),
+                      onToggle: () => _store.toggleChannel(i),
+                      onManage: () => _showActions(context, channels[i]),
+                      onLongPress: () => _showActions(context, channels[i]),
                     ),
                   ),
                 ]),
@@ -90,7 +128,7 @@ class MyChannelsScreen extends StatelessWidget {
     );
   }
 
-  void _showActions(BuildContext context, AppStore store, ChannelItem channel) {
+  void _showActions(BuildContext context, ChannelItem channel) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
@@ -99,43 +137,30 @@ class MyChannelsScreen extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _actionItem(
-              ctx,
-              'Add electronic device to this channel',
-              () {
-                Navigator.pop(ctx);
-                Navigator.pushNamed(context, '/add-device', arguments: channel.name);
-              },
-            ),
+            _actionItem(ctx, 'Add electronic device to this channel', () {
+              Navigator.pop(ctx);
+              Navigator.pushNamed(context, '/add-device', arguments: channel.name);
+            }),
             const SizedBox(height: 20),
-            _actionItem(
-              ctx,
-              'Remove all electronic devices from channel',
-              () {
-                Navigator.pop(ctx);
-                _confirmRemoveAllDevices(context, store, channel.name);
-              },
-            ),
+            _actionItem(ctx, 'Remove all electronic devices from channel', () {
+              Navigator.pop(ctx);
+              _confirmRemoveAllDevices(context, channel.name);
+            }),
             const SizedBox(height: 20),
-            _actionItem(
-              ctx,
-              'Delete the channel',
-              () {
-                Navigator.pop(ctx);
-                _confirmDelete(context, store, channel.name);
-              },
-            ),
+            _actionItem(ctx, 'Delete the channel', () {
+              Navigator.pop(ctx);
+              _confirmDelete(context, channel.name);
+            }),
             const SizedBox(height: 20),
-            _actionItem(
-              ctx,
-              'Edit channel name',
-              () {
-                Navigator.pop(ctx);
-                _editChannelName(context, store, channel.name);
-              },
-            ),
+            _actionItem(ctx, 'Edit channel name', () {
+              Navigator.pop(ctx);
+              _editChannelName(context, channel.name);
+            }),
             const SizedBox(height: 20),
-            GestureDetector(onTap: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: AppColors.textPurple, fontSize: 16, fontWeight: FontWeight.w500))),
+            GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: AppColors.textPurple, fontSize: 16, fontWeight: FontWeight.w500)),
+            ),
             const SizedBox(height: 8),
           ]),
         ),
@@ -148,8 +173,8 @@ class MyChannelsScreen extends StatelessWidget {
     child: Text(label, style: const TextStyle(color: AppColors.textPurple, fontSize: 16, fontWeight: FontWeight.w500)),
   );
 
-  Future<void> _confirmRemoveAllDevices(BuildContext context, AppStore store, String channelName) async {
-    final shouldRemove = await showDialog<bool>(
+  Future<void> _confirmRemoveAllDevices(BuildContext context, String channelName) async {
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove All Devices'),
@@ -160,19 +185,15 @@ class MyChannelsScreen extends StatelessWidget {
         ],
       ),
     );
-
-    if (shouldRemove != true) return;
-
-    await store.clearDevicesInChannel(channelName);
+    if (ok != true) return;
+    await _store.clearDevicesInChannel(channelName);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All devices removed from channel')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All devices removed from channel')));
     }
   }
 
-  Future<void> _confirmDelete(BuildContext context, AppStore store, String channelName) async {
-    final shouldDelete = await showDialog<bool>(
+  Future<void> _confirmDelete(BuildContext context, String channelName) async {
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Channel'),
@@ -183,52 +204,35 @@ class MyChannelsScreen extends StatelessWidget {
         ],
       ),
     );
-
-    if (shouldDelete != true) return;
-
-    await store.deleteChannel(channelName);
+    if (ok != true) return;
+    await _store.deleteChannel(channelName);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Channel deleted')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Channel deleted')));
     }
   }
 
-  Future<void> _editChannelName(BuildContext context, AppStore store, String oldName) async {
+  Future<void> _editChannelName(BuildContext context, String oldName) async {
     final ctrl = TextEditingController(text: oldName);
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Edit Channel Name'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Channel name'),
-        ),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: 'Channel name')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Save'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Save')),
         ],
       ),
     );
-
     if (newName == null || newName.isEmpty || newName == oldName) return;
-
     try {
-      await store.renameChannel(oldName, newName);
+      await _store.renameChannel(oldName, newName);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Channel name updated')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Channel name updated')));
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
   }
@@ -277,7 +281,7 @@ class _ChannelCard extends StatelessWidget {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [
+            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               Text('Manage', style: TextStyle(color: AppColors.textPurple, fontSize: 13, fontWeight: FontWeight.w600)),
               SizedBox(width: 4),
               Icon(Icons.settings, color: AppColors.textPurple, size: 14),

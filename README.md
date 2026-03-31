@@ -94,4 +94,4 @@ Defined in `lib/main.dart`, including:
 ## Notes
 
 - App is currently set to portrait-only orientation.
-- App icon is configured through `flutter_launcher_icons` using `assets/logo.png`.
+- App icon is configured through `flutter_launcher_icons` using `assets/logo.jpeg`.

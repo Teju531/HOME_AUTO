@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
 
@@ -10,6 +11,24 @@ class ManageSceneScreen extends StatefulWidget {
 
 class _ManageSceneScreenState extends State<ManageSceneScreen> {
   final _store = AppStore.instance;
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good Morning!';
+    if (h < 17) return 'Good Afternoon!';
+    return 'Good Evening!';
+  }
+
+  String _displayName() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.displayName != null && user!.displayName!.trim().isNotEmpty) {
+      return user.displayName!.trim();
+    }
+    final email = user?.email ?? '';
+    if (email.isEmpty) return 'User';
+    final local = email.split('@').first.trim();
+    return local.isEmpty ? 'User' : local[0].toUpperCase() + local.substring(1);
+  }
   int _tabIndex = 0;
   final _nameCtrl = TextEditingController();
   int _timerMinutes = 0;
@@ -315,83 +334,106 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
   }
 
   Widget _scheduleContent() {
-    final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final dayShort = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(),
-        const Text('Schedule Settings', style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 12),
+        const Text('Schedule — auto activate by time:',
+            style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 16),
 
+        // Start time
         Row(children: [
-          Radio<bool>(value: true, groupValue: _scheduleByTime,
-              onChanged: (_) => setState(() => _scheduleByTime = true), activeColor: AppColors.primary),
-          const Text('By Time', style: TextStyle(color: AppColors.primaryDark, fontSize: 13)),
-          const SizedBox(width: 20),
-          Radio<bool>(value: false, groupValue: _scheduleByTime,
-              onChanged: (_) => setState(() => _scheduleByTime = false), activeColor: AppColors.primary),
-          const Text('Day/Night', style: TextStyle(color: AppColors.primaryDark, fontSize: 13)),
+          const Text('From:', style: TextStyle(color: AppColors.textLight, fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: () async {
+              final t = await showTimePicker(context: context, initialTime: _startTime);
+              if (t != null) setState(() => _startTime = t);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(_startTime.format(context),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Text('To:', style: TextStyle(color: AppColors.textLight, fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: () async {
+              final t = await showTimePicker(context: context, initialTime: _endTime);
+              if (t != null) setState(() => _endTime = t);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primaryMid,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(_endTime.format(context),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+            ),
+          ),
         ]),
+        const SizedBox(height: 16),
 
-        if (_scheduleByTime) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            GestureDetector(
-              onTap: () async {
-                final t = await showTimePicker(context: context, initialTime: _startTime);
-                if (t != null) setState(() => _startTime = t);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: const Color(0xFFECEBFF), borderRadius: BorderRadius.circular(8)),
-                child: Text(_startTime.format(context),
-                    style: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
-              ),
-            ),
-            const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('to', style: TextStyle(color: AppColors.textLight))),
-            GestureDetector(
-              onTap: () async {
-                final t = await showTimePicker(context: context, initialTime: _endTime);
-                if (t != null) setState(() => _endTime = t);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: const Color(0xFFECEBFF), borderRadius: BorderRadius.circular(8)),
-                child: Text(_endTime.format(context),
-                    style: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: List.generate(7, (i) => GestureDetector(
+        // Day selector
+        const Text('Repeat on:', style: TextStyle(color: AppColors.textLight, fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Row(children: [
+          ...List.generate(7, (i) => GestureDetector(
             onTap: () => setState(() => _selectedDays[i] = !_selectedDays[i]),
             child: Container(
               margin: const EdgeInsets.only(right: 6),
-              width: 32, height: 32,
+              width: 36, height: 36,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: _selectedDays[i] ? AppColors.primary : const Color(0xFFECEBFF),
+                border: Border.all(
+                  color: _selectedDays[i] ? AppColors.primary : AppColors.lightGrey,
+                ),
               ),
-              child: Center(child: Text(days[i], style: TextStyle(
+              child: Center(child: Text(dayShort[i], style: TextStyle(
                   color: _selectedDays[i] ? Colors.white : AppColors.primaryMid,
-                  fontSize: 11, fontWeight: FontWeight.w600))),
+                  fontSize: 11, fontWeight: FontWeight.w700))),
             ),
-          ))),
-        ] else ...[
-          const SizedBox(height: 8),
-          RadioListTile<bool>(
-            value: true, groupValue: _sunriseToSunset,
-            onChanged: (v) => setState(() => _sunriseToSunset = true),
-            title: const Text('Sunrise to Sunset', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-            activeColor: AppColors.primary, dense: true, contentPadding: EdgeInsets.zero,
+          )),
+        ]),
+        const SizedBox(height: 6),
+        Text(
+          _selectedDays.every((d) => !d)
+              ? 'Every day'
+              : 'On: ${List.generate(7, (i) => _selectedDays[i] ? days[i] : null).whereType<String>().join(', ')}',
+          style: const TextStyle(color: AppColors.textLight, fontSize: 11, fontStyle: FontStyle.italic),
+        ),
+        const SizedBox(height: 12),
+
+        // Preview
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.green.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.green.withOpacity(0.4)),
           ),
-          RadioListTile<bool>(
-            value: false, groupValue: _sunriseToSunset,
-            onChanged: (v) => setState(() => _sunriseToSunset = false),
-            title: const Text('Sunset to Sunrise', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-            activeColor: AppColors.primary, dense: true, contentPadding: EdgeInsets.zero,
-          ),
-        ],
+          child: Row(children: [
+            const Icon(Icons.schedule, color: AppColors.green, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Scene will turn ON at ${_startTime.format(context)} and OFF at ${_endTime.format(context)}',
+                style: const TextStyle(color: AppColors.green, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+        ),
       ],
     );
   }
@@ -420,7 +462,7 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
     }
 
     // Build schedule fields (only if Schedule tab is active)
-    final hasSchedule = _tabIndex == 2 && _scheduleByTime;
+    final hasSchedule = _tabIndex == 2;
 
     final newScene = SceneItem(
       name: name,

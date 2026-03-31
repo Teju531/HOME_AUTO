@@ -300,7 +300,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Expanded(child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Good Morning!', style: TextStyle(
+                            Text(_greeting(), style: const TextStyle(
                                 color: Colors.white, fontSize: 16,
                                 fontWeight: FontWeight.w700)),
                             const SizedBox(height: 4),
@@ -664,6 +664,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final localPart = email.split('@').first.trim();
     if (localPart.isEmpty) return 'User';
     return localPart[0].toUpperCase() + localPart.substring(1);
+  }
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good Morning!';
+    if (h < 17) return 'Good Afternoon!';
+    return 'Good Evening!';
   }
 
   String _formatDate(DateTime dt) {

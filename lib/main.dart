@@ -110,7 +110,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: Center(child: _StartupLogoAnimation()),
           );
         }
         if (snapshot.hasData) {
@@ -121,8 +121,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
               if (!mounted) return;
               if (AppStore.instance.homeId == null) {
                 Navigator.pushReplacementNamed(context, '/home-setup');
-              } else {
-                AppStore.instance.startScheduleChecker();
               }
             });
             AppStore.instance.startRealtime(uid).catchError((e) {
@@ -139,6 +137,72 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
         return const OnboardingScreen();
       },
+    );
+  }
+}
+
+class _StartupLogoAnimation extends StatefulWidget {
+  const _StartupLogoAnimation();
+
+  @override
+  State<_StartupLogoAnimation> createState() => _StartupLogoAnimationState();
+}
+
+class _StartupLogoAnimationState extends State<_StartupLogoAnimation>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    _opacity = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
+    _scale = Tween<double>(begin: 0.92, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.75, end: 1.0).animate(_opacity),
+      child: ScaleTransition(
+        scale: _scale,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 230,
+              height: 120,
+              child: Image.asset(
+                'assets/logo.jpeg',
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Apsis smart home',
+              style: TextStyle(
+                color: Color(0xFF5E60CE),
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -120,10 +120,16 @@ class _PageContent extends StatelessWidget {
       child: Column(
         children: [
           // Logo at top
-          Image.asset(
-            'assets/logo.png',
-            height: 60,
-            errorBuilder: (context, error, stackTrace) => const Icon(Icons.home_outlined, size: 60, color: Color(0xFF8A6FEA)),
+          SizedBox(
+            width: 200,
+            height: 72,
+            child: Image.asset(
+              'assets/logo.jpeg',
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (context, error, stackTrace) =>
+                  const Icon(Icons.home_outlined, size: 60, color: Color(0xFF8A6FEA)),
+            ),
           ),
           const SizedBox(height: 16),
           Expanded(

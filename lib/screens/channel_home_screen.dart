@@ -23,6 +23,9 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
   }
 
   void _showAddDeviceDialog() {
+    final ch = _channel;
+    if (ch == null) return;
+
     final ctrl = TextEditingController(text: 'Light Bulb');
     String selectedPlug = 'Plug 1';
     showDialog<void>(
@@ -38,18 +41,45 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
                 const SizedBox(height: 16),
                 Container(width: 70, height: 70, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primaryMid, width: 2)), child: const Icon(Icons.lightbulb_outline, color: AppColors.primaryMid, size: 36)),
                 const SizedBox(height: 16),
-                TextField(controller: ctrl, style: const TextStyle(color: AppColors.primaryMid, fontSize: 16), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.only(bottom: 6), enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFCCCCCC))), focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)))),
+                TextField(
+                  controller: ctrl,
+                  style: const TextStyle(color: AppColors.primaryMid, fontSize: 16),
+                  decoration: const InputDecoration(
+                    hintText: 'Device name',
+                    isDense: true,
+                    contentPadding: EdgeInsets.only(bottom: 6),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFCCCCCC))),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: selectedPlug,
                   style: const TextStyle(color: AppColors.primaryMid, fontSize: 16),
-                  decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.only(bottom: 6), enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFCCCCCC))), focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary))),
-                  items: const [
-                    DropdownMenuItem(value: 'Plug 1', child: Text('Plug 1')),
-                    DropdownMenuItem(value: 'Plug 2', child: Text('Plug 2')),
-                    DropdownMenuItem(value: 'Plug 3', child: Text('Plug 3')),
-                    DropdownMenuItem(value: 'Plug 4', child: Text('Plug 4')),
-                  ],
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.only(bottom: 6),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFCCCCCC))),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
+                  ),
+                  items: ['Plug 1', 'Plug 2', 'Plug 3', 'Plug 4'].map((p) {
+                    final devicesOnPlug = ch.devices.where((d) => d.plug == p).length;
+                    final isFull = devicesOnPlug >= 2;
+                    return DropdownMenuItem(
+                      value: p,
+                      child: Row(children: [
+                        Text(p),
+                        const SizedBox(width: 8),
+                        Text(
+                          isFull ? '(full)' : '($devicesOnPlug/2)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isFull ? AppColors.red : AppColors.textLight,
+                          ),
+                        ),
+                      ]),
+                    );
+                  }).toList(),
                   onChanged: (v) { if (v != null) setDState(() => selectedPlug = v); },
                 ),
                 const SizedBox(height: 24),
@@ -58,8 +88,32 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
                   onPressed: () {
                     final name = ctrl.text.trim();
                     if (name.isEmpty) return;
-                    final targetChannel = _channel?.name ?? _channelName;
-                    _store.addDeviceToChannel(targetChannel, DeviceItem(name: name, channelName: targetChannel, plug: selectedPlug, icon: Icons.lightbulb_outline, isOn: false));
+                    final targetChannel = ch.name;
+
+                    // Rule 1: same name + same plug not allowed
+                    if (ch.devices.any((d) => d.name.toLowerCase() == name.toLowerCase() && d.plug == selectedPlug)) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(content: Text('"$name" already exists on $selectedPlug.'),
+                            backgroundColor: AppColors.red));
+                      return;
+                    }
+
+                    // Rule 2: max 2 devices per plug
+                    final devicesOnPlug = ch.devices.where((d) => d.plug == selectedPlug).length;
+                    if (devicesOnPlug >= 2) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(content: Text('$selectedPlug already has 2 devices. Max 2 per plug.'),
+                            backgroundColor: AppColors.red));
+                      return;
+                    }
+
+                    _store.addDeviceToChannel(targetChannel, DeviceItem(
+                      name: name,
+                      channelName: targetChannel,
+                      plug: selectedPlug,
+                      icon: Icons.lightbulb_outline,
+                      isOn: false,
+                    ));
                     setState(() {});
                     Navigator.pop(dCtx);
                   },

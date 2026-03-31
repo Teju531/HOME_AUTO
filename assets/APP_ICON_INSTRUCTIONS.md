@@ -20,10 +20,10 @@ The app currently uses the default Flutter launcher icons located in:
    - Background color: #5E60CE (purple)
    - Icon: Home symbol
    - Text: "IoT" or home icon
-3. Download and place in `assets/app_icon.png`
+3. Download and place in `assets/logo.jpeg`
 4. Run the commands from Option 1
 
 ## Current Icon Theme
 - Primary Color: #5E60CE (Purple)
 - Icon Style: Home/Smart Home theme
-- App Name: IoT Smart Home
+- App Name: Apsis Smart Home

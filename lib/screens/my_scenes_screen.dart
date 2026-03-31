@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
@@ -10,6 +11,46 @@ class MyScenesScreen extends StatefulWidget {
 
 class _MyScenesScreenState extends State<MyScenesScreen> {
   final _store = AppStore.instance;
+  // sceneName -> seconds remaining (only when timer is active)
+  final Map<String, int> _countdowns = {};
+  final Map<String, Timer> _countdownTimers = {};
+
+  @override
+  void dispose() {
+    for (final t in _countdownTimers.values) t.cancel();
+    super.dispose();
+  }
+
+  void _startCountdown(SceneItem scene) {
+    if (scene.timerMinutes <= 0) return;
+    _countdownTimers[scene.name]?.cancel();
+    _countdowns[scene.name] = scene.timerMinutes * 60;
+    _countdownTimers[scene.name] = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      setState(() {
+        final remaining = (_countdowns[scene.name] ?? 0) - 1;
+        if (remaining <= 0) {
+          _countdowns.remove(scene.name);
+          _countdownTimers[scene.name]?.cancel();
+          _countdownTimers.remove(scene.name);
+        } else {
+          _countdowns[scene.name] = remaining;
+        }
+      });
+    });
+  }
+
+  void _stopCountdown(String sceneName) {
+    _countdownTimers[sceneName]?.cancel();
+    _countdownTimers.remove(sceneName);
+    _countdowns.remove(sceneName);
+  }
+
+  String _formatCountdown(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +64,6 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
               children: [
                 Column(
                   children: [
-                    // ── AppBar
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                       child: Row(
@@ -39,23 +79,16 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
                               Text('My Scenes', style: TextStyle(color: AppColors.primaryDark, fontSize: 18, fontWeight: FontWeight.w700)),
                             ]),
                           ),
-                          Stack(
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.notifications_none, color: AppColors.primaryDark, size: 24),
-                                onPressed: () {},
-                              ),
-                              if (scenes.isNotEmpty)
-                                Positioned(
-                                  right: 8, top: 8,
-                                  child: Container(
-                                    width: 16, height: 16,
-                                    decoration: const BoxDecoration(color: AppColors.orange, shape: BoxShape.circle),
-                                    child: Center(child: Text('${scenes.length}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700))),
-                                  ),
-                                ),
-                            ],
-                          ),
+                          Stack(children: [
+                            IconButton(icon: const Icon(Icons.notifications_none, color: AppColors.primaryDark, size: 24), onPressed: () {}),
+                            if (scenes.isNotEmpty)
+                              Positioned(right: 8, top: 8,
+                                child: Container(
+                                  width: 16, height: 16,
+                                  decoration: const BoxDecoration(color: AppColors.orange, shape: BoxShape.circle),
+                                  child: Center(child: Text('${scenes.length}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700))),
+                                )),
+                          ]),
                         ],
                       ),
                     ),
@@ -65,7 +98,6 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // ── Summary card
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -74,50 +106,43 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
                                 borderRadius: BorderRadius.circular(18),
                                 boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 8, offset: Offset(0, 4))],
                               ),
-                              child: Row(
-                                children: [
-                                  const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    Text('Good Morning!', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-                                    SizedBox(height: 4),
-                                    Text('Nitin', style: TextStyle(color: Colors.white, fontSize: 14)),
-                                  ])),
-                                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                    const Text('Total Channels', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-                                    const SizedBox(height: 4),
-                                    Text('${_store.channels.value.length}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                                  ]),
-                                ],
-                              ),
+                              child: Row(children: [
+                                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text('My Scenes', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                                  SizedBox(height: 4),
+                                  Text('Manage your home scenes', style: TextStyle(color: Colors.white, fontSize: 13)),
+                                ])),
+                                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                  const Text('Total Scenes', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+                                  const SizedBox(height: 4),
+                                  Text('${scenes.length}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                                ]),
+                              ]),
                             ),
                             const SizedBox(height: 20),
-
-                            // ── Section header
-                            Row(
-                              children: [
-                                const Row(children: [
-                                  Icon(Icons.nightlight_round, color: AppColors.primaryDark, size: 18),
-                                  SizedBox(width: 6),
-                                  Text('My Scenes', style: TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
-                                ]),
-                                const Spacer(),
-                                OutlinedButton.icon(
-                                  onPressed: () => _showAddSceneDialog(),
-                                  style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(color: AppColors.primary, width: 1.5),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  icon: const Icon(Icons.add, color: AppColors.primary, size: 16),
-                                  label: const Text('Add More Scenes', style: TextStyle(color: AppColors.primary, fontSize: 12)),
+                            Row(children: [
+                              const Row(children: [
+                                Icon(Icons.nightlight_round, color: AppColors.primaryDark, size: 18),
+                                SizedBox(width: 6),
+                                Text('My Scenes', style: TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
+                              ]),
+                              const Spacer(),
+                              OutlinedButton.icon(
+                                onPressed: () => Navigator.pushNamed(context, '/manage-scene'),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: AppColors.primary, width: 1.5),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  visualDensity: VisualDensity.compact,
                                 ),
-                              ],
-                            ),
+                                icon: const Icon(Icons.add, color: AppColors.primary, size: 16),
+                                label: const Text('Add Scene', style: TextStyle(color: AppColors.primary, fontSize: 12)),
+                              ),
+                            ]),
                             const SizedBox(height: 4),
                             const Text('List of all scenes in my home',
                                 style: TextStyle(color: AppColors.textLight, fontSize: 12, fontStyle: FontStyle.italic)),
                             const SizedBox(height: 14),
-
                             if (scenes.isEmpty)
                               const Center(
                                 child: Padding(
@@ -131,7 +156,7 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
                                 shrinkWrap: true,
                                 physics: const NeverScrollableScrollPhysics(),
                                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.0),
+                                    crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 0.85),
                                 itemCount: scenes.length,
                                 itemBuilder: (_, i) => _sceneCard(scenes[i], i),
                               ),
@@ -141,7 +166,6 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
                     ),
                   ],
                 ),
-                // ── Bottom nav
                 Positioned(
                   left: 16, right: 16, bottom: 14,
                   child: Row(children: [
@@ -167,61 +191,96 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
   }
 
   Widget _sceneCard(SceneItem scene, int idx) {
+    final countdown = _countdowns[scene.name];
+    final hasCountdown = countdown != null && countdown > 0;
+
     return GestureDetector(
       onLongPress: () => _showSceneOptions(scene, idx),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scene.isOn ? const Color(0xFFECEBFF) : Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: scene.isOn ? AppColors.primary : AppColors.lightGrey,
+            width: scene.isOn ? 1.5 : 1,
+          ),
           boxShadow: const [BoxShadow(color: Color(0x10000000), blurRadius: 6)],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.nightlight_round, color: AppColors.primaryMid, size: 18),
-                const Spacer(),
-                // Delete button
-                GestureDetector(
-                  onTap: () => _showSceneOptions(scene, idx),
-                  child: const Icon(Icons.more_vert, color: AppColors.textLight, size: 18),
-                ),
-              ],
-            ),
+            Row(children: [
+              Icon(Icons.nightlight_round,
+                  color: scene.isOn ? AppColors.primary : AppColors.primaryMid, size: 18),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => _showSceneOptions(scene, idx),
+                child: const Icon(Icons.more_vert, color: AppColors.textLight, size: 18),
+              ),
+            ]),
             const SizedBox(height: 6),
             Text(scene.name,
                 style: const TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 3),
-            Text('${scene.deviceCount} Device${scene.deviceCount == 1 ? '' : 's'}${scene.timerMinutes > 0 ? ' • ${scene.timerMinutes}min timer' : ''}',
-                style: const TextStyle(color: AppColors.orange, fontSize: 11, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pushNamed(context, '/manage-scene', arguments: scene.name),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.primary, width: 1),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      visualDensity: VisualDensity.compact,
-                      minimumSize: const Size(0, 27),
-                    ),
-                    child: const Text('Manage', style: TextStyle(color: AppColors.primary, fontSize: 10)),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                PowerButton(
-                  isOn: scene.isOn,
-                  size: 32,
-                  onTap: () => _store.toggleScene(idx),
-                ),
-              ],
+            Text(
+              '${scene.deviceCount} Device${scene.deviceCount == 1 ? '' : 's'}'
+              '${scene.timerMinutes > 0 ? ' • ${scene.timerMinutes}min' : ''}'
+              '${scene.hasSchedule ? ' • Scheduled' : ''}',
+              style: const TextStyle(color: AppColors.orange, fontSize: 10, fontWeight: FontWeight.w600),
             ),
+
+            // ── Countdown display
+            if (hasCountdown) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.orange.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.orange, width: 1),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.timer, color: AppColors.orange, size: 12),
+                  const SizedBox(width: 4),
+                  Text(_formatCountdown(countdown),
+                      style: const TextStyle(color: AppColors.orange, fontSize: 12,
+                          fontWeight: FontWeight.w700, fontFamily: 'monospace')),
+                ]),
+              ),
+            ],
+
+            const Spacer(),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pushNamed(context, '/manage-scene', arguments: scene.name),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.primary, width: 1),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 27),
+                  ),
+                  child: const Text('Manage', style: TextStyle(color: AppColors.primary, fontSize: 10)),
+                ),
+              ),
+              const SizedBox(width: 6),
+              PowerButton(
+                isOn: scene.isOn,
+                size: 32,
+                onTap: () async {
+                  await _store.toggleScene(idx);
+                  final updated = _store.scenes.value[idx];
+                  if (updated.isOn && updated.timerMinutes > 0) {
+                    _startCountdown(updated);
+                  } else {
+                    _stopCountdown(scene.name);
+                  }
+                },
+              ),
+            ]),
           ],
         ),
       ),
@@ -238,7 +297,10 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
           const SizedBox(height: 8),
           Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.lightGrey, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
-          _sheetItem('Manage the scene', () { Navigator.pop(context); Navigator.pushNamed(context, '/manage-scene', arguments: scene.name); }),
+          _sheetItem('Manage the scene', () {
+            Navigator.pop(context);
+            Navigator.pushNamed(context, '/manage-scene', arguments: scene.name);
+          }),
           _sheetItem('Delete scene', () async {
             Navigator.pop(context);
             final ok = await showDialog<bool>(
@@ -248,11 +310,15 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
                 content: Text('Delete "${scene.name}"?'),
                 actions: [
                   TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+                  TextButton(onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Delete', style: TextStyle(color: AppColors.red))),
                 ],
               ),
             );
-            if (ok == true) await _store.deleteScene(scene.name);
+            if (ok == true) {
+              _stopCountdown(scene.name);
+              await _store.deleteScene(scene.name);
+            }
           }, isDestructive: true),
           _sheetItem('Cancel', () => Navigator.pop(context)),
           const SizedBox(height: 20),
@@ -266,10 +332,6 @@ class _MyScenesScreenState extends State<MyScenesScreen> {
       title: Text(label, style: TextStyle(color: isDestructive ? AppColors.red : AppColors.primary, fontSize: 15)),
       onTap: onTap,
     );
-  }
-
-  void _showAddSceneDialog() {
-    Navigator.pushNamed(context, '/manage-scene');
   }
 
   Widget _navBtn(IconData icon, Color color, VoidCallback onTap) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
 
@@ -11,6 +12,24 @@ class UsersScreen extends StatefulWidget {
 class _UsersScreenState extends State<UsersScreen> {
   final _store = AppStore.instance;
   late List<MemberItem> _members;
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good Morning!';
+    if (h < 17) return 'Good Afternoon!';
+    return 'Good Evening!';
+  }
+
+  String _displayName() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.displayName != null && user!.displayName!.trim().isNotEmpty) {
+      return user.displayName!.trim();
+    }
+    final email = user?.email ?? '';
+    if (email.isEmpty) return 'User';
+    final local = email.split('@').first.trim();
+    return local.isEmpty ? 'User' : local[0].toUpperCase() + local.substring(1);
+  }
 
   @override
   void initState() {
@@ -76,10 +95,10 @@ class _UsersScreenState extends State<UsersScreen> {
                           ),
                           child: Row(
                             children: [
-                              const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('Good Morning!', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-                                SizedBox(height: 4),
-                                Text('Nitin', style: TextStyle(color: Colors.white, fontSize: 14)),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(_greeting(), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 4),
+                                Text(_displayName(), style: const TextStyle(color: Colors.white, fontSize: 14)),
                               ])),
                               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                                 const Text('Total Members', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),

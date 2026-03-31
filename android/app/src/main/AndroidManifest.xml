@@ -34,7 +34,7 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
 
     <application
-        android:label="IoT Smart Home"
+        android:label="Apsis smart home"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -146,6 +146,8 @@ class AppStore {
     if (homeId != null) {
       channels.value = await _fs.loadChannels(homeId!);
       scenes.value   = await _fs.loadScenes(homeId!);
+      // Always start schedule checker after data is loaded
+      startScheduleChecker();
     }
     isLoading.value = false;
   }
@@ -388,13 +390,48 @@ class AppStore {
           ? currentMinutes >= startMinutes && currentMinutes < endMinutes
           : currentMinutes >= startMinutes || currentMinutes < endMinutes; // overnight
 
+      // Only act if state needs to change — prevents flip-flop
       if (shouldBeOn && !scene.isOn) {
         debugPrint('Schedule: turning ON scene "${scene.name}"');
-        toggleScene(i);
+        _activateScene(i, true);
       } else if (!shouldBeOn && scene.isOn) {
         debugPrint('Schedule: turning OFF scene "${scene.name}"');
-        toggleScene(i);
+        _activateScene(i, false);
       }
+    }
+  }
+
+  // Activate/deactivate scene to a specific state (used by scheduler)
+  Future<void> _activateScene(int index, bool targetOn) async {
+    final list = List<SceneItem>.from(scenes.value);
+    if (index >= list.length) return;
+    final scene = list[index];
+    if (scene.isOn == targetOn) return; // already in correct state
+    scene.isOn = targetOn;
+    scenes.value = List.from(list);
+    if (homeId != null) await _fs.updateSceneState(homeId!, scene.name, targetOn);
+
+    final devicesToControl = <MapEntry<String, int>>[];
+    if (scene.deviceKeys.isNotEmpty) {
+      for (final key in scene.deviceKeys) {
+        final parts = key.split('|||');
+        if (parts.length != 2) continue;
+        final channelName = parts[0];
+        final deviceIndex = int.tryParse(parts[1]);
+        if (deviceIndex == null) continue;
+        final ci = channels.value.indexWhere((c) => c.name == channelName);
+        if (ci == -1 || deviceIndex >= channels.value[ci].devices.length) continue;
+        devicesToControl.add(MapEntry(channelName, deviceIndex));
+      }
+    } else {
+      for (final ch in channels.value) {
+        for (var i = 0; i < ch.devices.length; i++) {
+          devicesToControl.add(MapEntry(ch.name, i));
+        }
+      }
+    }
+    for (final entry in devicesToControl) {
+      await _setDeviceState(entry.key, entry.value, targetOn);
     }
   }
 

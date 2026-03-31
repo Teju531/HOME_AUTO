@@ -163,7 +163,26 @@ class _AddDeviceToChannelScreenState extends State<AddDeviceToChannelScreen> {
                                           value: _selectedPlug,
                                           isExpanded: true,
                                           style: const TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600),
-                                          items: List.generate(4, (i) => DropdownMenuItem(value: i + 1, child: Text('${i + 1}'))),
+                                          items: List.generate(4, (i) {
+                                            final plugLabel = 'Plug ${i + 1}';
+                                            final count = channels[_selectedChannelIdx].devices
+                                                .where((d) => d.plug == plugLabel).length;
+                                            final isFull = count >= 2;
+                                            return DropdownMenuItem(
+                                              value: i + 1,
+                                              child: Row(children: [
+                                                Text('Plug ${i + 1}'),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  isFull ? '(full)' : '($count/2)',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: isFull ? AppColors.red : AppColors.textLight,
+                                                  ),
+                                                ),
+                                              ]),
+                                            );
+                                          }),
                                           onChanged: (v) => setState(() => _selectedPlug = v!),
                                         ),
                                       ),
@@ -286,11 +305,23 @@ class _AddDeviceToChannelScreenState extends State<AddDeviceToChannelScreen> {
     }
     final channels = _store.channels.value;
     final ch = channels[_selectedChannelIdx];
-    if (ch.devices.length >= ch.totalPlugs) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${ch.name} is full (max ${ch.totalPlugs} devices)')));
+    final plugLabel = 'Plug $_selectedPlug';
+
+    // Rule 1: same name + same plug not allowed
+    if (ch.devices.any((d) => d.name.toLowerCase() == name.toLowerCase() && d.plug == plugLabel)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"$name" already exists on $plugLabel.'), backgroundColor: AppColors.red));
       return;
     }
-    final plugLabel = 'Plug $_selectedPlug';
+
+    // Rule 2: max 2 devices per plug
+    final devicesOnPlug = ch.devices.where((d) => d.plug == plugLabel).length;
+    if (devicesOnPlug >= 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$plugLabel already has 2 devices. Max 2 per plug.'), backgroundColor: AppColors.red));
+      return;
+    }
+
     _store.addDeviceToChannel(ch.name, DeviceItem(
       name: name, channelName: ch.name, plug: plugLabel, icon: _selectedIcon,
     ));
