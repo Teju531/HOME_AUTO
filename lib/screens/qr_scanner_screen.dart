@@ -11,6 +11,7 @@ class QRScannerScreen extends StatefulWidget {
 
 class _QRScannerScreenState extends State<QRScannerScreen> {
   MobileScannerController cameraController = MobileScannerController();
+  bool _scanned = false;
 
   @override
   void dispose() {
@@ -45,10 +46,13 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
           MobileScanner(
             controller: cameraController,
             onDetect: (capture) {
+              if (_scanned) return;
               final List<Barcode> barcodes = capture.barcodes;
               if (barcodes.isNotEmpty) {
                 final String? code = barcodes.first.rawValue;
                 if (code != null) {
+                  _scanned = true;
+                  cameraController.stop();
                   Navigator.pop(context, code);
                 }
               }

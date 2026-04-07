@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
 import 'add_channel_wifi_screen.dart';
+import '../services/firestore_service.dart';
 import 'qr_scanner_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -44,9 +45,8 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // ── ADD CHANNEL: Step 1 — Scan QR to get MAC ────────────────────────────
+  // -- ADD CHANNEL: Step 1 - Scan QR to get MAC
   Future<void> _startAddChannel() async {
-    // Request camera permission
     final camStatus = await Permission.camera.request();
     if (!camStatus.isGranted) {
       if (!mounted) return;
@@ -57,7 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted) return;
 
-    // Open QR scanner
     final qrResult = await Navigator.push<String>(
       context,
       MaterialPageRoute(builder: (_) => const QRScannerScreen()),
@@ -65,22 +64,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted || qrResult == null || qrResult.trim().isEmpty) return;
 
-    // Extract MAC from QR — handles formats:
-    // "AC:67:B2:3F:11:E4"  plain MAC
-    // "MAC:AC:67:B2:3F:11:E4"  prefixed
-    // {"mac":"AC:67:B2:3F:11:E4"}  JSON
+    setState(() => _btStatus = 'Reading QR code...');
+
     final mac = _extractMac(qrResult.trim());
 
     if (mac == null) {
+      setState(() => _btStatus = '');
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not read MAC from QR. Please try again.'),
               backgroundColor: AppColors.red));
       return;
     }
 
-    setState(() => _btStatus = 'QR scanned. Enabling Bluetooth…');
+    setState(() => _btStatus = 'QR scanned. Checking device ownership...');
 
-    // Enable Bluetooth
+    final homeId = _store.homeId;
+    if (homeId != null) {
+      final ownerHomeId = await FirestoreService.instance.getDeviceOwnerHomeId(mac);
+      if (!mounted) return;
+
+      if (ownerHomeId != null && ownerHomeId != homeId) {
+        setState(() => _btStatus = '');
+        showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Row(children: [
+              Icon(Icons.lock, color: AppColors.red, size: 22),
+              SizedBox(width: 8),
+              Text('Device Already Registered'),
+            ]),
+            content: const Text(
+              'This device is already registered to another account. '
+              'Only the original owner can use this device.\n\n'
+              'If you believe this is an error, contact the device owner.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() => _btStatus = 'Enabling Bluetooth...');
+
     if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
       try { await FlutterBluePlus.turnOn(); } catch (_) {}
       await Future.delayed(const Duration(seconds: 2));
@@ -94,9 +125,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    setState(() => _btStatus = 'Scanning for device $mac…');
+    setState(() => _btStatus = 'Scanning for device $mac...');
 
-    // Scan BLE and find device by MAC
     final device = await _findDeviceByMac(mac);
 
     if (!mounted) return;
@@ -109,11 +139,10 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Auto-connect to the found device
     await _connectAndGoToWifi(device);
   }
 
-  // ── Scan BLE for up to 10s, return device matching MAC ──────────────────
+  // -- Scan BLE for up to 10s, return device matching MAC
   Future<BluetoothDevice?> _findDeviceByMac(String mac) async {
     final normalizedTarget = mac.toUpperCase().replaceAll(':', '').replaceAll('-', '');
     BluetoothDevice? found;
@@ -135,7 +164,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    // Also complete when scan stops (timeout)
     FlutterBluePlus.isScanning.listen((scanning) {
       if (!scanning && !completer.isCompleted) {
         completer.complete(found);
@@ -148,10 +176,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return result;
   }
 
-  // ── Connect to device and navigate to WiFi screen ───────────────────────
+  // -- Connect to device and navigate to WiFi screen
   Future<void> _connectAndGoToWifi(BluetoothDevice device) async {
     setState(() => _btStatus =
-        'Connecting to ${device.platformName.isNotEmpty ? device.platformName : device.remoteId}…');
+        'Connecting to ${device.platformName.isNotEmpty ? device.platformName : device.remoteId}...');
 
     try {
       await device.connect(timeout: const Duration(seconds: 15));
@@ -172,7 +200,6 @@ class _HomeScreenState extends State<HomeScreen> {
         if (found != null) break;
       }
 
-      // Fallback: first writable characteristic
       if (found == null) {
         for (var svc in services) {
           for (var c in svc.characteristics) {
@@ -197,6 +224,13 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       _store.connectBle(device);
+
+      final mac = device.remoteId.str;
+      final homeId = _store.homeId;
+      if (homeId != null && mac.isNotEmpty) {
+        FirestoreService.instance.registerDevice(homeId, mac);
+      }
+
       Navigator.pushNamed(
         context,
         '/add-channel-wifi',
@@ -211,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ── Connect BLE for direct control (no provisioning) ────────────────────
+  // -- Reconnect BLE using already-registered MACs (no QR needed)
   Future<void> _connectBleForControl() async {
     if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
       try { await FlutterBluePlus.turnOn(); } catch (_) {}
@@ -219,36 +253,28 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (!mounted) return;
 
-    // Scan QR to get MAC, then auto-connect for control
-    final camStatus = await Permission.camera.request();
-    if (!camStatus.isGranted) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera permission required.')));
-      return;
-    }
+    final homeId = _store.homeId;
+    if (homeId == null) return;
 
-    final qrResult = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(builder: (_) => const QRScannerScreen()),
-    );
-    if (!mounted || qrResult == null) return;
-
-    final mac = _extractMac(qrResult.trim());
-    if (mac == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid QR code.'), backgroundColor: AppColors.red));
-      return;
-    }
-
-    setState(() => _btStatus = 'Finding device $mac…');
-    final device = await _findDeviceByMac(mac);
-    setState(() => _btStatus = '');
-
+    setState(() => _btStatus = 'Looking up registered devices...');
+    final macs = await FirestoreService.instance.getRegisteredMacs(homeId);
     if (!mounted) return;
+
+    if (macs.isEmpty) {
+      setState(() => _btStatus = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No registered devices found. Scan QR to add one.')));
+      return;
+    }
+
+    setState(() => _btStatus = 'Scanning for known devices...');
+    final device = await _findAnyRegisteredDevice(macs);
+    setState(() => _btStatus = '');
+    if (!mounted) return;
+
     if (device == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Device $mac not found nearby.'),
+          const SnackBar(content: Text('No registered devices found nearby.'),
               backgroundColor: AppColors.red));
       return;
     }
@@ -261,18 +287,42 @@ class _HomeScreenState extends State<HomeScreen> {
     ));
   }
 
-  // ── Extract MAC from various QR formats ─────────────────────────────────
+  // -- Scan BLE and return first device matching any registered MAC
+  Future<BluetoothDevice?> _findAnyRegisteredDevice(List<String> macs) async {
+    final targets = macs
+        .map((m) => m.toUpperCase().replaceAll(':', '').replaceAll('-', ''))
+        .toSet();
+    BluetoothDevice? found;
+    final completer = Completer<BluetoothDevice?>();
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+    final sub = FlutterBluePlus.scanResults.listen((results) {
+      for (final r in results) {
+        final id = r.device.remoteId.str
+            .toUpperCase().replaceAll(':', '').replaceAll('-', '');
+        if (targets.contains(id)) {
+          found = r.device;
+          if (!completer.isCompleted) completer.complete(r.device);
+          break;
+        }
+      }
+    });
+    FlutterBluePlus.isScanning.listen((scanning) {
+      if (!scanning && !completer.isCompleted) completer.complete(found);
+    });
+    final result = await completer.future;
+    await sub.cancel();
+    await FlutterBluePlus.stopScan();
+    return result;
+  }
+
+  // -- Extract MAC from various QR formats
   String? _extractMac(String raw) {
-    // Standard MAC pattern: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX
-    final macRegex = RegExp(
-        r'([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}');
+    final macRegex = RegExp(r'([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}');
     final match = macRegex.firstMatch(raw);
     if (match != null) return match.group(0)!.toUpperCase();
 
-    // 12 hex chars without separator: AABBCCDDEEFF
     final hexRegex = RegExp(r'^[0-9A-Fa-f]{12}$');
     if (hexRegex.hasMatch(raw)) {
-      // Format as MAC
       return raw.toUpperCase().replaceAllMapped(
           RegExp(r'.{2}'), (m) => '${m.group(0)}:').trimRight().replaceAll(RegExp(r':$'), '');
     }
@@ -283,8 +333,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFFF7F8FC),
       body: SafeArea(
+        bottom: false,
         child: ValueListenableBuilder<List<ChannelItem>>(
           valueListenable: _store.channels,
           builder: (context, channels, _) {
@@ -292,24 +343,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
             return Stack(children: [
               SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(18, 12, 18, 110),
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
 
-                    // ── Top bar
+                    // Top bar
                     Row(children: [
-                      const Spacer(),
-                      const Text('Home', style: TextStyle(
-                          color: AppColors.primaryMid,
-                          fontSize: 20, fontWeight: FontWeight.w700)),
-                      const Spacer(),
-                      const Icon(Icons.notifications_none,
-                          color: AppColors.primaryMid, size: 26),
+                      const SizedBox(width: 40),
+                      const Expanded(
+                        child: Center(
+                          child: Text('Home', style: TextStyle(
+                              color: AppColors.primaryMid,
+                              fontSize: 20, fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                      const ProfileAvatar(),
+                      const SizedBox(width: 4),
                     ]),
                     const SizedBox(height: 16),
 
-                    // ── BLE connecting status banner
+                    // BLE status banner
                     if (_btStatus.isNotEmpty) ...[
                       Container(
                         width: double.infinity,
@@ -333,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
 
-                    // ── Connection mode indicator
+                    // Connection mode indicator
                     ValueListenableBuilder<bool>(
                       valueListenable: _store.isBleConnected,
                       builder: (context, bleOn, _) => Container(
@@ -355,8 +409,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 8),
                           Text(
                             bleOn
-                                ? 'Local (Bluetooth) — instant control'
-                                : 'Remote (WiFi/MQTT) — cloud control',
+                                ? 'Local (Bluetooth) - instant control'
+                                : 'Remote (WiFi/MQTT) - cloud control',
                             style: TextStyle(
                                 color: bleOn ? AppColors.green : AppColors.primary,
                                 fontSize: 12, fontWeight: FontWeight.w600),
@@ -383,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
 
-                    // ── Greeting card
+                    // Greeting card
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                       decoration: BoxDecoration(
@@ -417,7 +471,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // ── My Channels
+                    // My Channels
                     _sectionHeader(
                       'My Channels', 'View All',
                       () => Navigator.pushNamed(context, '/my-channels'),
@@ -447,7 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     const SizedBox(height: 24),
 
-                    // ── My Scenes
+                    // My Scenes
                     _sectionHeader(
                       'My Scenes', 'View All',
                       () => Navigator.pushNamed(context, '/my-scenes'),
@@ -489,44 +543,28 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-
-              // ── Bottom nav
-              Positioned(
-                left: 16, right: 16, bottom: 14,
-                child: Row(children: [
-                  _navBtn(Icons.nightlight_round, AppColors.primaryDark,
-                      () => Navigator.pushNamed(context, '/my-scenes')),
-                  const SizedBox(width: 10),
-                  _navBtn(Icons.grid_view_rounded, AppColors.primaryDark,
-                      () => Navigator.pushNamed(context, '/my-channels')),
-                  const SizedBox(width: 10),
-                  _navBtn(Icons.power_outlined, AppColors.primaryDark,
-                      () => Navigator.pushNamed(context, '/my-devices')),
-                  const SizedBox(width: 10),
-                  _navBtn(Icons.people_outline, AppColors.primaryDark,
-                      () => Navigator.pushNamed(context, '/users')),
-                  const Spacer(),
-                  // QR scan + add channel button
-                  GestureDetector(
-                    onTap: _startAddChannel,
-                    child: Container(
-                      width: 46, height: 46,
-                      decoration: const BoxDecoration(
-                          color: Color(0xFF4B4FA3), shape: BoxShape.circle),
-                      child: const Icon(Icons.qr_code_scanner,
-                          color: Colors.white, size: 22),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  _navBtn(Icons.logout, AppColors.red, () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (!mounted) return;
-                    Navigator.pushReplacementNamed(context, '/login');
-                  }),
-                ]),
-              ),
             ]);
           },
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+              _miniBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-channels')),
+              _miniBtn(Icons.qr_code_scanner, AppColors.primaryMid, _startAddChannel),
+              _miniBtn(Icons.power_outlined, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-devices')),
+              _miniBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
+              _miniBtn(Icons.logout, AppColors.red, () async {
+                await FirebaseAuth.instance.signOut();
+                if (!mounted) return;
+                Navigator.pushReplacementNamed(context, '/login');
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -629,27 +667,51 @@ class _HomeScreenState extends State<HomeScreen> {
           style: const TextStyle(color: AppColors.textLight,
               fontSize: 13, height: 1.4)),
       const SizedBox(height: 12),
-      OutlinedButton.icon(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-            side: const BorderSide(color: AppColors.primary, width: 1.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            minimumSize: const Size(180, 44)),
-        icon: Icon(icon, color: AppColors.primary, size: 18),
-        label: Text(btnLabel,
-            style: const TextStyle(color: AppColors.primary, fontSize: 14)),
+      Center(
+        child: Container(
+          width: 236,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x12070B72),
+                blurRadius: 14,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: OutlinedButton.icon(
+            onPressed: onTap,
+            style: OutlinedButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.92),
+                side: const BorderSide(color: AppColors.primary, width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                minimumSize: const Size(236, 46),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: AppColors.primary, size: 16),
+            ),
+            label: Text(btnLabel,
+                style: const TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ),
       ),
       const SizedBox(height: 8),
     ]);
   }
 
-  Widget _navBtn(IconData icon, Color color, VoidCallback onTap) {
+  Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-          width: 46, height: 46,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          child: Icon(icon, color: Colors.white, size: 22)),
+      child: Icon(icon, color: color, size: 26),
     );
   }
 

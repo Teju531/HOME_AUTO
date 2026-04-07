@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AppColors {
   // Primary palette
@@ -67,7 +69,54 @@ class AppTextStyles {
   );
 }
 
-// Reusable gradient button
+// Profile avatar — listens to AppStore.profilePhoto, taps to /my-account
+// Import app_store lazily to avoid circular dependency
+class ProfileAvatar extends StatelessWidget {
+  final double radius;
+  const ProfileAvatar({super.key, this.radius = 18});
+
+  @override
+  Widget build(BuildContext context) {
+    // Import here to avoid top-level circular import
+    final store = _AppStoreRef.instance;
+    return ValueListenableBuilder<String?>(
+      valueListenable: store.profilePhoto,
+      builder: (context, path, _) {
+        final user = FirebaseAuth.instance.currentUser;
+        final initial = ((user?.displayName?.isNotEmpty == true
+            ? user!.displayName![0]
+            : user?.email?[0]) ?? '?').toUpperCase();
+        final ImageProvider? img =
+            path != null && File(path).existsSync() ? FileImage(File(path)) : null;
+        return GestureDetector(
+          onTap: () => Navigator.pushNamed(context, '/my-account'),
+          child: CircleAvatar(
+            radius: radius,
+            backgroundColor: AppColors.primary.withOpacity(0.15),
+            backgroundImage: img,
+            child: img == null
+                ? Text(initial,
+                    style: TextStyle(
+                        color: AppColors.primary,
+                        fontSize: radius * 0.75,
+                        fontWeight: FontWeight.w700))
+                : null,
+          ),
+        );
+      },
+    );
+  }
+}
+
+// Thin wrapper so app_constants doesn't directly import app_store
+class _AppStoreRef {
+  static late dynamic instance;
+}
+
+void initProfileAvatarStore(dynamic store) {
+  _AppStoreRef.instance = store;
+}
+
 class GradientButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;

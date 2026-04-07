@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
+import '../services/firestore_service.dart';
 
 class UserPermissionsScreen extends StatefulWidget {
   const UserPermissionsScreen({super.key});
@@ -27,6 +28,31 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
         _deviceEnabled[ch.name]![i] = false;
       }
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadExistingPermissions());
+  }
+
+  Future<void> _loadExistingPermissions() async {
+    final member = ModalRoute.of(context)?.settings.arguments as MemberItem?;
+    if (member == null) return;
+    final homeId = _store.homeId;
+    if (homeId == null) return;
+    final homeMembers = await FirestoreService.instance.getHomeMembers(homeId);
+    final ownerUid = homeMembers.firstWhere(
+        (m) => m['isOwner'] == '1', orElse: () => {})['uid'] ?? '';
+    final allowed = await FirestoreService.instance.loadPermissions(homeId, member.uid, ownerUid);
+    if (allowed == null || !mounted) return; // null = owner, full access
+    setState(() {
+      for (final key in allowed) {
+        final parts = key.split('|||');
+        if (parts.length != 2) continue;
+        final chName = parts[0];
+        final devIdx = int.tryParse(parts[1]);
+        if (devIdx == null) continue;
+        _channelEnabled[chName] = true;
+        _deviceEnabled[chName] ??= {};
+        _deviceEnabled[chName]![devIdx] = true;
+      }
+    });
   }
 
   @override
@@ -269,7 +295,7 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
   }
 
   void _showCloneDialog() {
-    final otherMembers = _store.members.where((m) => m.name != _nameCtrl.text).toList();
+    final otherMembers = _store.members.value.where((m) => m.name != _nameCtrl.text).toList();
     String? selected;
 
     showDialog(
@@ -315,8 +341,27 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
     );
   }
 
-  void _save() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Permissions saved')));
+  void _save() async {
+    final member = ModalRoute.of(context)?.settings.arguments as MemberItem?;
+    if (member == null) return;
+    final homeId = _store.homeId;
+    if (homeId == null) return;
+
+    // Build list of allowed device keys
+    final allowedKeys = <String>[];
+    for (final ch in _store.channels.value) {
+      final chEnabled = _channelEnabled[ch.name] ?? false;
+      if (!chEnabled) continue;
+      for (int i = 0; i < ch.devices.length; i++) {
+        final devEnabled = _deviceEnabled[ch.name]?[i] ?? false;
+        if (devEnabled) allowedKeys.add('${ch.name}|||$i');
+      }
+    }
+
+    await FirestoreService.instance.savePermissions(homeId, member.uid, allowedKeys);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permissions saved'), backgroundColor: AppColors.green));
     Navigator.pop(context);
   }
 

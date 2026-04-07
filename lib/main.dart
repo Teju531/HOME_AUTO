@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/app_store.dart';
+import 'constants/app_constants.dart';
+import 'services/firestore_service.dart';
 
 import 'screens/onboarding_screen.dart';
 import 'screens/login_screen.dart';
@@ -31,6 +33,7 @@ void main() async {
     const Duration(seconds: 10),
     onTimeout: () => throw Exception('Firebase init timed out'),
   );
+  initProfileAvatarStore(AppStore.instance);
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const IoTApp());
 }
@@ -96,6 +99,7 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   String? _activeUid;
+  bool _loadingHome = false;
 
   @override
   void dispose() {
@@ -108,7 +112,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting || _loadingHome) {
           return const Scaffold(
             body: Center(child: _StartupLogoAnimation()),
           );
@@ -117,15 +121,38 @@ class _AuthWrapperState extends State<AuthWrapper> {
           final uid = snapshot.data!.uid;
           if (_activeUid != uid) {
             _activeUid = uid;
-            AppStore.instance.loadFromFirestore().then((_) {
+            _loadingHome = true;
+            AppStore.instance.loadFromFirestore().then((_) async {
               if (!mounted) return;
-              if (AppStore.instance.homeId == null) {
+              final homeId = AppStore.instance.homeId;
+              if (homeId == null) {
+                setState(() => _loadingHome = false);
                 Navigator.pushReplacementNamed(context, '/home-setup');
+                return;
               }
+              // Check if user is still a member of the home
+              final members = await FirestoreService.instance.getHomeMembers(homeId);
+              if (!mounted) return;
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              final stillMember = members.any((m) => m['uid'] == uid);
+              if (!stillMember) {
+                AppStore.instance.homeId = null;
+                AppStore.instance.channels.value = [];
+                AppStore.instance.scenes.value = [];
+                AppStore.instance.members.value = [];
+                setState(() => _loadingHome = false);
+                Navigator.pushReplacementNamed(context, '/home-setup');
+                return;
+              }
+              setState(() => _loadingHome = false);
             });
             AppStore.instance.startRealtime(uid).catchError((e) {
               debugPrint('Realtime MQTT start failed: $e');
             });
+            // Show loader while fetching
+            return const Scaffold(
+              body: Center(child: _StartupLogoAnimation()),
+            );
           }
           return const HomeScreen();
         }

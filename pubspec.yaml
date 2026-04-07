@@ -19,6 +19,9 @@ dependencies:
   flutter_blue_plus: ^1.32.12   # ← ADDED for BLE connectivity
   cloud_firestore: ^6.2.0
   mqtt_client: ^10.5.1
+  qr_flutter: ^4.1.0
+  image_picker: ^1.1.2
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

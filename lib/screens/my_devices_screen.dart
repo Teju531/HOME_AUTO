@@ -38,104 +38,127 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
         final allDevices = _store.allDevices;
         return Scaffold(
           backgroundColor: AppColors.background,
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _miniBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
+                  _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+                  _miniBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-channels')),
+                  _miniBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
+                  _miniBtn(Icons.power_outlined, AppColors.primary, () {}),
+                  _miniBtn(Icons.logout, AppColors.red, () async {
+                    await FirebaseAuth.instance.signOut();
+                    if (!mounted) return;
+                    Navigator.pushReplacementNamed(context, '/login');
+                  }),
+                ],
+              ),
+            ),
+          ),
           body: SafeArea(
-            child: Stack(
+            child: Column(
               children: [
-                Column(
-                  children: [
-                    // ── AppBar
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryDark, size: 20),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                          const Expanded(
-                            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                              Icon(Icons.power, color: AppColors.primaryDark, size: 20),
-                              SizedBox(width: 6),
-                              Text('My Devices', style: TextStyle(color: AppColors.primaryDark, fontSize: 18, fontWeight: FontWeight.w700)),
-                            ]),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.notifications_none, color: AppColors.primaryDark, size: 24),
-                            onPressed: () {},
-                          ),
-                        ],
+                // AppBar
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryDark, size: 20),
+                        onPressed: () => Navigator.pop(context),
                       ),
-                    ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(18, 4, 18, 110),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // ── Summary card
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                              decoration: BoxDecoration(
-                                color: AppColors.primaryMid,
-                                borderRadius: BorderRadius.circular(18),
-                                boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 8, offset: Offset(0, 4))],
-                              ),
-                              child: Row(
-                                children: [
-                              Expanded(
-                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text(_greeting(), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-                                      const SizedBox(height: 4),
-                                      Text(_displayName(), style: const TextStyle(color: Colors.white, fontSize: 14)),
-                                    ]),
-                                  ),
-                                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                    const Text('Total Devices', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-                                    const SizedBox(height: 4),
-                                    Text('${allDevices.length}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                                  ]),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-
-                            // ── Section header
-                            const Row(children: [
-                              Icon(Icons.power, color: AppColors.primaryDark, size: 18),
-                              SizedBox(width: 6),
-                              Text('Devices in my home',
-                                  style: TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
-                            ]),
-                            const SizedBox(height: 4),
-                            const Text('List of all electronic devices in my home.',
-                                style: TextStyle(color: AppColors.textLight, fontSize: 12, fontStyle: FontStyle.italic)),
-                            const SizedBox(height: 14),
-
-                            if (allDevices.isEmpty)
-                              const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.only(top: 40),
-                                  child: Text('No devices yet. Add a device to a channel.',
-                                      style: TextStyle(color: AppColors.textLight, fontSize: 13)),
-                                ),
-                              )
-                            else
-                              ...allDevices.asMap().entries.map((e) => _deviceRow(e.value, e.key, channels)),
-                          ],
-                        ),
+                      const Expanded(
+                        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.power, color: AppColors.primaryDark, size: 20),
+                          SizedBox(width: 6),
+                          Text('My Devices', style: TextStyle(color: AppColors.primaryDark, fontSize: 18, fontWeight: FontWeight.w700)),
+                        ]),
                       ),
-                    ),
-                  ],
+                      const Padding(padding: EdgeInsets.only(right: 8), child: ProfileAvatar()),
+                    ],
+                  ),
                 ),
-                // ── Bottom nav
-                Positioned(
-                  left: 16, right: 16, bottom: 14,
-                  child: Row(children: [
-                    _navBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-                    const Spacer(),
-                    _navBtn(Icons.add, AppColors.red, () => Navigator.pushNamed(context, '/add-device')),
-                  ]),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Summary card
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryMid,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 8, offset: Offset(0, 4))],
+                          ),
+                          child: Row(children: [
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(_greeting(), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 4),
+                              Text(_displayName(), style: const TextStyle(color: Colors.white, fontSize: 14)),
+                            ])),
+                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                              const Text('Total Devices', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 4),
+                              Text('${allDevices.length}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                            ]),
+                          ]),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Section header
+                        Row(children: [
+                          const Icon(Icons.power, color: AppColors.primaryDark, size: 18),
+                          const SizedBox(width: 6),
+                          const Text('Devices in my home',
+                              style: TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
+                          const Spacer(),
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.pushNamed(context, '/add-device'),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: AppColors.textPurple, width: 1.5),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: const Icon(Icons.add, color: AppColors.textPurple, size: 16),
+                            label: const Text('Add Device', style: TextStyle(color: AppColors.textPurple, fontSize: 12)),
+                          ),
+                        ]),
+                        const SizedBox(height: 4),
+                        const Text('List of all electronic devices in my home.',
+                            style: TextStyle(color: AppColors.textLight, fontSize: 12, fontStyle: FontStyle.italic)),
+                        const SizedBox(height: 14),
+
+                        if (allDevices.isEmpty)
+                          const Center(
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 40),
+                              child: Text('No devices yet. Add a device to a channel.',
+                                  style: TextStyle(color: AppColors.textLight, fontSize: 13)),
+                            ),
+                          )
+                        else
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.85,
+                            ),
+                            itemCount: allDevices.length,
+                            itemBuilder: (_, i) => _deviceCard(allDevices[i], channels),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -145,39 +168,72 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
     );
   }
 
-  Widget _deviceRow(DeviceItem d, int globalIdx, List<ChannelItem> channels) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: const [BoxShadow(color: Color(0x10000000), blurRadius: 4)],
+  Widget _deviceCard(DeviceItem d, List<ChannelItem> channels) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: d.isOn ? const Color(0xFFECEBFF) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: d.isOn ? AppColors.primary : AppColors.lightGrey,
+          width: d.isOn ? 1.5 : 1,
         ),
-        child: Row(
-          children: [
-            Icon(d.icon, color: AppColors.primaryMid, size: 22),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(d.name,
-                      style: const TextStyle(color: AppColors.primaryMid, fontSize: 14, fontWeight: FontWeight.w700),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 2),
-                  Text('${d.channelName} • ${d.plug}',
-                      style: const TextStyle(color: AppColors.textLight, fontSize: 10),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
-              ),
+        boxShadow: const [BoxShadow(color: Color(0x10000000), blurRadius: 6, offset: Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(d.icon, color: d.isOn ? AppColors.primary : AppColors.primaryMid, size: 22),
+            const Spacer(),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.textLight, size: 18),
+              padding: EdgeInsets.zero,
+              onSelected: (value) async {
+                if (value == 'rename') await _renameDevice(d);
+                else if (value == 'delete') await _deleteDevice(d);
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'rename', child: Row(children: [
+                  Icon(Icons.edit, color: AppColors.primary, size: 16),
+                  SizedBox(width: 8),
+                  Text('Rename', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+                ])),
+                const PopupMenuItem(value: 'delete', child: Row(children: [
+                  Icon(Icons.delete_outline, color: AppColors.red, size: 16),
+                  SizedBox(width: 8),
+                  Text('Delete', style: TextStyle(color: AppColors.red, fontSize: 13)),
+                ])),
+              ],
             ),
-            const SizedBox(width: 8),
+          ]),
+          const SizedBox(height: 6),
+          Text(d.name,
+              style: const TextStyle(color: AppColors.primaryDark, fontSize: 12, fontWeight: FontWeight.w700),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(d.channelName,
+              style: const TextStyle(color: AppColors.textLight, fontSize: 10),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.orange.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(d.plug,
+                style: const TextStyle(color: AppColors.orange, fontSize: 9, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(d.isOn ? 'ON' : 'OFF',
+                style: TextStyle(
+                    color: d.isOn ? AppColors.green : AppColors.textLight,
+                    fontSize: 12, fontWeight: FontWeight.w700)),
             PowerButton(
               isOn: d.isOn,
-              size: 36,
+              size: 34,
               onTap: () {
                 final ci = channels.indexWhere((c) => c.name == d.channelName);
                 if (ci != -1) {
@@ -187,38 +243,8 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
                 }
               },
             ),
-            // ⋮ options menu
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: AppColors.textLight, size: 20),
-              padding: EdgeInsets.zero,
-              onSelected: (value) async {
-                if (value == 'rename') {
-                  await _renameDevice(d);
-                } else if (value == 'delete') {
-                  await _deleteDevice(d);
-                }
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'rename',
-                  child: Row(children: [
-                    Icon(Icons.edit, color: AppColors.primary, size: 18),
-                    SizedBox(width: 10),
-                    Text('Rename', style: TextStyle(color: AppColors.primary)),
-                  ]),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(children: [
-                    Icon(Icons.delete_outline, color: AppColors.red, size: 18),
-                    SizedBox(width: 10),
-                    Text('Delete', style: TextStyle(color: AppColors.red)),
-                  ]),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ]),
+        ],
       ),
     );
   }
@@ -236,18 +262,14 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Save'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Save')),
         ],
       ),
     );
     if (newName == null || newName.isEmpty || newName == d.name) return;
     await _store.renameDevice(d.channelName, d, newName);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Device renamed')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device renamed')));
   }
 
   Future<void> _deleteDevice(DeviceItem d) async {
@@ -258,24 +280,18 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
         content: Text('Delete "${d.name}" from ${d.channelName}?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete', style: TextStyle(color: AppColors.red))),
         ],
       ),
     );
     if (ok == true) await _store.deleteDevice(d.channelName, d);
   }
 
-  Widget _navBtn(IconData icon, Color color, VoidCallback onTap) {
+  Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 48, height: 48,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 24),
-      ),
+      child: Icon(icon, color: color, size: 26),
     );
   }
 }

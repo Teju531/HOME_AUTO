@@ -176,9 +176,8 @@ class MqttService {
 
   void _subscribeTopics() {
     if (!isConnected) return;
-    _client!.subscribe(_cmdTopic,   MqttQos.atMostOnce);
     _client!.subscribe(_stateTopic, MqttQos.atMostOnce);
-    debugPrint('MQTT subscribed to AWB_SMSW topics');
+    debugPrint('MQTT subscribed to $_stateTopic');
   }
 
   void _publishRaw(String topic, String message) {

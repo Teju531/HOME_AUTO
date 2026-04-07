@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
+import '../services/firestore_service.dart';
 
 class ManageSceneScreen extends StatefulWidget {
   const ManageSceneScreen({super.key});
@@ -11,34 +11,14 @@ class ManageSceneScreen extends StatefulWidget {
 
 class _ManageSceneScreenState extends State<ManageSceneScreen> {
   final _store = AppStore.instance;
-
-  String _greeting() {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good Morning!';
-    if (h < 17) return 'Good Afternoon!';
-    return 'Good Evening!';
-  }
-
-  String _displayName() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user?.displayName != null && user!.displayName!.trim().isNotEmpty) {
-      return user.displayName!.trim();
-    }
-    final email = user?.email ?? '';
-    if (email.isEmpty) return 'User';
-    final local = email.split('@').first.trim();
-    return local.isEmpty ? 'User' : local[0].toUpperCase() + local.substring(1);
-  }
   int _tabIndex = 0;
   final _nameCtrl = TextEditingController();
   int _timerMinutes = 0;
   int _selectedChannelIdx = 0;
   final Map<String, bool> _deviceSelections = {};
-  bool _scheduleByTime = true;
   final List<bool> _selectedDays = List.filled(7, false);
   TimeOfDay _startTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _endTime = const TimeOfDay(hour: 12, minute: 0);
-  bool _sunriseToSunset = true;
   bool _initialized = false;
 
   @override
@@ -438,7 +418,7 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
     );
   }
 
-  void _saveScene() {
+  Future<void> _saveScene() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -478,10 +458,13 @@ class _ManageSceneScreenState extends State<ManageSceneScreen> {
     );
 
     if (existingIdx == -1) {
-      _store.addScene(newScene);
+      await _store.addScene(newScene);
     } else {
       list[existingIdx] = newScene;
       _store.scenes.value = list;
+      if (_store.homeId != null) {
+        await FirestoreService.instance.addScene(_store.homeId!, newScene);
+      }
     }
 
     ScaffoldMessenger.of(context).showSnackBar(

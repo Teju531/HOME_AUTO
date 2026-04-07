@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/firestore_service.dart';
 import '../services/mqtt_service.dart';
 import '../services/ble_control_service.dart';
@@ -99,9 +101,10 @@ class SceneItem {
 
 // ─── Member Model ──────────────────────────────────────────────────────────────
 class MemberItem {
+  final String uid;
   final String name;
-  final String? avatarPath;
-  const MemberItem({required this.name, this.avatarPath});
+  final bool isOwner;
+  const MemberItem({required this.uid, required this.name, this.isOwner = false});
 }
 
 // ─── App Store (singleton) ────────────────────────────────────────────────────
@@ -115,8 +118,33 @@ class AppStore {
   final _mqtt  = MqttService.instance;
   final _ble   = BleControlService.instance;
 
-  // ── homeId — shared across all members of the same home ───────────────────
+  // ── Profile photo path (local) — all screens listen to this ─────────────
+  final ValueNotifier<String?> profilePhoto = ValueNotifier(null);
+
+  Future<void> loadProfilePhoto() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final path = prefs.getString('profile_photo_$uid');
+    if (path != null && File(path).existsSync()) {
+      profilePhoto.value = path;
+    }
+  }
+
+  Future<void> setProfilePhoto(String path) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('profile_photo_$uid', path);
+    profilePhoto.value = path;
+  }
+
+  // ── homeId — active home ───────────────────────────────────────────────
   String? homeId;
+  final ValueNotifier<List<String>> allHomeIds = ValueNotifier([]);
+  final ValueNotifier<Map<String, String>> homeNames = ValueNotifier({});
+  // Allowed device keys for current user in active home (null = full access)
+  List<String>? allowedDeviceKeys;
 
   // ── Connection mode notifier — UI listens to show BLE/WiFi indicator ──────
   final ValueNotifier<bool> isBleConnected = ValueNotifier(false);
@@ -128,13 +156,8 @@ class AppStore {
   final ValueNotifier<Map<String, dynamic>> lastTelemetry = ValueNotifier({});
   final ValueNotifier<Map<String, dynamic>> lastAck = ValueNotifier({});
 
-  // Members (kept local for now)
-  final List<MemberItem> members = const [
-    MemberItem(name: 'Aditya'),
-    MemberItem(name: 'Naman'),
-    MemberItem(name: 'Tina'),
-    MemberItem(name: 'Atishay'),
-  ];
+  // Members — loaded from Firestore
+  final ValueNotifier<List<MemberItem>> members = ValueNotifier([]);
 
   List<DeviceItem> get allDevices =>
       channels.value.expand((c) => c.devices).toList();
@@ -142,14 +165,66 @@ class AppStore {
   // ── Load homeId then all data from Firestore ───────────────────────────────
   Future<void> loadFromFirestore() async {
     isLoading.value = true;
-    homeId ??= await _fs.getHomeId();
+    // Load all homes user belongs to
+    final ids = await _fs.getAllHomeIds();
+    allHomeIds.value = ids;
+    // Load home names
+    final names = <String, String>{};
+    for (final id in ids) {
+      final name = await _fs.getHomeName(id);
+      names[id] = name ?? id;
+    }
+    homeNames.value = names;
+    // Set active home if not set
+    homeId ??= ids.isNotEmpty ? ids.first : null;
     if (homeId != null) {
-      channels.value = await _fs.loadChannels(homeId!);
-      scenes.value   = await _fs.loadScenes(homeId!);
-      // Always start schedule checker after data is loaded
-      startScheduleChecker();
+      await _loadActiveHome();
     }
     isLoading.value = false;
+  }
+
+  Future<void> _loadActiveHome() async {
+    if (homeId == null) return;
+    channels.value = await _fs.loadChannels(homeId!);
+    scenes.value   = await _fs.loadScenes(homeId!);
+    await loadMembers();
+    await loadProfilePhoto();
+    // Load permissions for current user
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final homeDoc = await _fs.getHomeMembers(homeId!);
+      final ownerUid = homeDoc.isNotEmpty
+          ? homeDoc.firstWhere((m) => m['isOwner'] == '1', orElse: () => {})['uid'] ?? ''
+          : '';
+      allowedDeviceKeys = await _fs.loadPermissions(homeId!, uid, ownerUid);
+    }
+    startScheduleChecker();
+  }
+
+  // Switch active home
+  Future<void> switchHome(String newHomeId) async {
+    homeId = newHomeId;
+    channels.value = [];
+    scenes.value = [];
+    members.value = [];
+    allowedDeviceKeys = null;
+    await _loadActiveHome();
+  }
+
+  Future<void> loadMembers() async {
+    if (homeId == null) return;
+    final raw = await _fs.getHomeMembers(homeId!);
+    members.value = raw.map((m) => MemberItem(
+      uid: m['uid']!,
+      name: m['name']!,
+      isOwner: m['isOwner'] == '1',
+    )).toList();
+  }
+
+  Future<void> removeMember(String memberUid) async {
+    if (homeId == null) return;
+    await _fs.removeMember(homeId!, memberUid);
+    members.value = members.value.where((m) => m.uid != memberUid).toList();
   }
 
   Future<void> startRealtime(String uid) async {
@@ -189,6 +264,23 @@ class AppStore {
     final ok = await _fs.joinHome(id);
     if (ok) homeId = id;
     return ok;
+  }
+
+  // ── Join via invite QR token ─────────────────────────────────────────────────────
+  // Returns null on success, error message on failure
+  Future<String?> redeemInvite(String token) async {
+    final result = await _fs.redeemInviteToken(token);
+    if (result.ok && result.homeId != null) {
+      // Add to list of homes, don't replace
+      final ids = List<String>.from(allHomeIds.value);
+      if (!ids.contains(result.homeId)) ids.add(result.homeId!);
+      allHomeIds.value = ids;
+      // Load name for new home
+      final name = await _fs.getHomeName(result.homeId!);
+      homeNames.value = {...homeNames.value, result.homeId!: name ?? result.homeId!};
+      return null;
+    }
+    return result.errorMessage;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -236,7 +328,12 @@ class AppStore {
 
   Future<void> deleteChannel(String channelName) async {
     channels.value = channels.value.where((c) => c.name != channelName).toList();
-    if (homeId != null) await _fs.deleteChannel(homeId!, channelName);
+    if (homeId != null) {
+      await _fs.deleteChannel(homeId!, channelName);
+      // Unregister the MAC for this channel so it can be re-provisioned
+      // Channel name is typically the device name/MAC — unregister by channel name as MAC
+      await _fs.unregisterDevice(homeId!, channelName);
+    }
   }
 
   Future<void> clearDevicesInChannel(String channelName) async {
@@ -352,16 +449,15 @@ class AppStore {
   }
 
   // Active scene timers: sceneName -> Timer
-  final Map<String, dynamic> _sceneTimers = {};
+  final Map<String, Timer> _sceneTimers = {};
   Timer? _scheduleChecker;
 
-  // Start schedule checker — call once after login
   void startScheduleChecker() {
     _scheduleChecker?.cancel();
-    _scheduleChecker = Timer.periodic(const Duration(minutes: 1), (_) {
+    // Check every 30 seconds for more responsive scheduling
+    _scheduleChecker = Timer.periodic(const Duration(seconds: 30), (_) {
       _checkSchedules();
     });
-    // Also check immediately
     _checkSchedules();
   }
 
@@ -379,7 +475,6 @@ class AppStore {
       final scene = scenes.value[i];
       if (!scene.hasSchedule) continue;
 
-      // Check if today is a scheduled day (empty = every day)
       if (scene.scheduleDays.isNotEmpty &&
           !scene.scheduleDays.contains(currentDay)) continue;
 
@@ -388,14 +483,13 @@ class AppStore {
 
       final shouldBeOn = endMinutes > startMinutes
           ? currentMinutes >= startMinutes && currentMinutes < endMinutes
-          : currentMinutes >= startMinutes || currentMinutes < endMinutes; // overnight
+          : currentMinutes >= startMinutes || currentMinutes < endMinutes;
 
-      // Only act if state needs to change — prevents flip-flop
       if (shouldBeOn && !scene.isOn) {
-        debugPrint('Schedule: turning ON scene "${scene.name}"');
+        debugPrint('Schedule: turning ON "${scene.name}" at $currentMinutes (start=$startMinutes end=$endMinutes)');
         _activateScene(i, true);
       } else if (!shouldBeOn && scene.isOn) {
-        debugPrint('Schedule: turning OFF scene "${scene.name}"');
+        debugPrint('Schedule: turning OFF "${scene.name}" at $currentMinutes (start=$startMinutes end=$endMinutes)');
         _activateScene(i, false);
       }
     }
@@ -406,10 +500,28 @@ class AppStore {
     final list = List<SceneItem>.from(scenes.value);
     if (index >= list.length) return;
     final scene = list[index];
-    if (scene.isOn == targetOn) return; // already in correct state
-    scene.isOn = targetOn;
+    if (scene.isOn == targetOn) return;
+    list[index] = SceneItem(
+      name: scene.name,
+      deviceCount: scene.deviceCount,
+      isOn: targetOn,
+      icon: scene.icon,
+      deviceKeys: scene.deviceKeys,
+      timerMinutes: scene.timerMinutes,
+      scheduleStartHour: scene.scheduleStartHour,
+      scheduleStartMinute: scene.scheduleStartMinute,
+      scheduleEndHour: scene.scheduleEndHour,
+      scheduleEndMinute: scene.scheduleEndMinute,
+      scheduleDays: scene.scheduleDays,
+    );
     scenes.value = List.from(list);
     if (homeId != null) await _fs.updateSceneState(homeId!, scene.name, targetOn);
+
+    // Cancel timer if turning off
+    if (!targetOn) {
+      _sceneTimers[scene.name]?.cancel();
+      _sceneTimers.remove(scene.name);
+    }
 
     final devicesToControl = <MapEntry<String, int>>[];
     if (scene.deviceKeys.isNotEmpty) {
@@ -439,7 +551,19 @@ class AppStore {
     final list = List<SceneItem>.from(scenes.value);
     final scene = list[index];
     final newIsOn = !scene.isOn;
-    scene.isOn = newIsOn;
+    list[index] = SceneItem(
+      name: scene.name,
+      deviceCount: scene.deviceCount,
+      isOn: newIsOn,
+      icon: scene.icon,
+      deviceKeys: scene.deviceKeys,
+      timerMinutes: scene.timerMinutes,
+      scheduleStartHour: scene.scheduleStartHour,
+      scheduleStartMinute: scene.scheduleStartMinute,
+      scheduleEndHour: scene.scheduleEndHour,
+      scheduleEndMinute: scene.scheduleEndMinute,
+      scheduleDays: scene.scheduleDays,
+    );
     scenes.value = List.from(list);
     if (homeId != null) await _fs.updateSceneState(homeId!, scene.name, newIsOn);
 
@@ -472,18 +596,18 @@ class AppStore {
     }
 
     // Cancel any existing timer for this scene
-    (_sceneTimers[scene.name] as dynamic)?.cancel();
+    _sceneTimers[scene.name]?.cancel();
     _sceneTimers.remove(scene.name);
 
     // If turning ON and timer is set, schedule auto-off
     if (newIsOn && scene.timerMinutes > 0) {
-      _sceneTimers[scene.name] = Future.delayed(
+      _sceneTimers[scene.name] = Timer(
         Duration(minutes: scene.timerMinutes),
         () async {
           final currentList = List<SceneItem>.from(scenes.value);
           final idx = currentList.indexWhere((s) => s.name == scene.name);
           if (idx != -1 && currentList[idx].isOn) {
-            await toggleScene(idx); // turn off after timer
+            await toggleScene(idx);
           }
         },
       );

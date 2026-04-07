@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import '../constants/app_constants.dart';
-import 'qr_scanner_screen.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../constants/app_constants.dart';
+import '../models/app_store.dart';
+import '../services/firestore_service.dart';
+import 'add_channel_wifi_screen.dart';
+import 'qr_scanner_screen.dart';
 
 class AddChannelQRScreen extends StatefulWidget {
   const AddChannelQRScreen({super.key});
@@ -10,13 +15,181 @@ class AddChannelQRScreen extends StatefulWidget {
 }
 
 class _AddChannelQRScreenState extends State<AddChannelQRScreen> {
-  final _nameCtrl = TextEditingController(text: 'Migro_CH1');
-  bool _rememberWifi = true;
+  final _store = AppStore.instance;
+  static const String _serviceShort = '33ff';
+  static const String _charShort = '11ff';
+  String _status = '';
+  bool _loading = false;
 
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    super.dispose();
+  Future<void> _startAddChannel() async {
+    final camStatus = await Permission.camera.request();
+    if (!camStatus.isGranted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission required to scan QR.')));
+      return;
+    }
+    if (!mounted) return;
+
+    final qrResult = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const QRScannerScreen()),
+    );
+    if (!mounted || qrResult == null || qrResult.trim().isEmpty) return;
+
+    setState(() { _status = 'Reading QR code…'; _loading = true; });
+
+    final mac = _extractMac(qrResult.trim());
+    if (mac == null) {
+      setState(() { _status = ''; _loading = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read MAC from QR. Please try again.'),
+              backgroundColor: AppColors.red));
+      return;
+    }
+
+    setState(() => _status = 'QR scanned. Checking device ownership…');
+
+    final homeId = _store.homeId;
+    if (homeId != null) {
+      final ownerHomeId = await FirestoreService.instance.getDeviceOwnerHomeId(mac);
+      if (!mounted) return;
+      if (ownerHomeId != null && ownerHomeId != homeId) {
+        setState(() { _status = ''; _loading = false; });
+        showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Row(children: [
+              Icon(Icons.lock, color: AppColors.red, size: 22),
+              SizedBox(width: 8),
+              Text('Device Already Registered'),
+            ]),
+            content: const Text(
+                'This device is already registered to another account. '
+                'Only the original owner can use this device.'),
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() => _status = 'Enabling Bluetooth…');
+    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
+      try { await FlutterBluePlus.turnOn(); } catch (_) {}
+      await Future.delayed(const Duration(seconds: 2));
+    }
+    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
+      setState(() { _status = ''; _loading = false; });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enable Bluetooth and try again.')));
+      return;
+    }
+
+    setState(() => _status = 'Scanning for device $mac…');
+    final device = await _findDeviceByMac(mac);
+    if (!mounted) return;
+    if (device == null) {
+      setState(() { _status = ''; _loading = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Device $mac not found nearby.'),
+              backgroundColor: AppColors.red));
+      return;
+    }
+    await _connectAndGoToWifi(device);
+  }
+
+  Future<BluetoothDevice?> _findDeviceByMac(String mac) async {
+    final target = mac.toUpperCase().replaceAll(':', '').replaceAll('-', '');
+    BluetoothDevice? found;
+    final completer = Completer<BluetoothDevice?>();
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+    final sub = FlutterBluePlus.scanResults.listen((results) {
+      for (final r in results) {
+        final id = r.device.remoteId.str.toUpperCase().replaceAll(':', '').replaceAll('-', '');
+        if (id == target) {
+          found = r.device;
+          if (!completer.isCompleted) completer.complete(r.device);
+          break;
+        }
+      }
+    });
+    FlutterBluePlus.isScanning.listen((scanning) {
+      if (!scanning && !completer.isCompleted) completer.complete(found);
+    });
+    final result = await completer.future;
+    await sub.cancel();
+    await FlutterBluePlus.stopScan();
+    return result;
+  }
+
+  Future<void> _connectAndGoToWifi(BluetoothDevice device) async {
+    setState(() => _status =
+        'Connecting to ${device.platformName.isNotEmpty ? device.platformName : device.remoteId}…');
+    try {
+      await device.connect(timeout: const Duration(seconds: 15));
+      final services = await device.discoverServices();
+      BluetoothCharacteristic? found;
+      for (var svc in services) {
+        if (svc.serviceUuid.toString().toLowerCase().replaceAll('-', '').contains(_serviceShort)) {
+          for (var c in svc.characteristics) {
+            if (c.characteristicUuid.toString().toLowerCase().replaceAll('-', '').contains(_charShort)) {
+              found = c;
+              break;
+            }
+          }
+        }
+        if (found != null) break;
+      }
+      if (found == null) {
+        for (var svc in services) {
+          for (var c in svc.characteristics) {
+            if (c.properties.write || c.properties.writeWithoutResponse) {
+              found = c;
+              break;
+            }
+          }
+          if (found != null) break;
+        }
+      }
+      setState(() { _status = ''; _loading = false; });
+      if (!mounted) return;
+      if (found == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Connected but no writable characteristic found.'),
+          backgroundColor: Colors.orange,
+        ));
+        return;
+      }
+      _store.connectBle(device);
+      final mac = device.remoteId.str;
+      final homeId = _store.homeId;
+      if (homeId != null && mac.isNotEmpty) {
+        FirestoreService.instance.registerDevice(homeId, mac);
+      }
+      Navigator.pushNamed(context, '/add-channel-wifi',
+          arguments: AddChannelWifiArgs(device: device, characteristic: found));
+    } catch (e) {
+      setState(() { _status = ''; _loading = false; });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to connect: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  String? _extractMac(String raw) {
+    final macRegex = RegExp(r'([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}');
+    final match = macRegex.firstMatch(raw);
+    if (match != null) return match.group(0)!.toUpperCase();
+    final hexRegex = RegExp(r'^[0-9A-Fa-f]{12}$');
+    if (hexRegex.hasMatch(raw)) {
+      return raw.toUpperCase()
+          .replaceAllMapped(RegExp(r'.{2}'), (m) => '${m.group(0)}:')
+          .trimRight()
+          .replaceAll(RegExp(r':$'), '');
+    }
+    return null;
   }
 
   @override
@@ -24,192 +197,77 @@ class _AddChannelQRScreenState extends State<AddChannelQRScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                // ── App Bar
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryDark, size: 20),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      const Expanded(
-                        child: Text('Add Channel', textAlign: TextAlign.center,
-                            style: TextStyle(color: AppColors.primaryDark, fontSize: 18, fontWeight: FontWeight.w700)),
-                      ),
-                      TextButton(
-                        onPressed: _onNext,
-                        child: const Text('Next', style: TextStyle(color: AppColors.primaryDark, fontSize: 15, fontWeight: FontWeight.w600)),
-                      ),
-                    ],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryDark, size: 20),
+                    onPressed: () => Navigator.pop(context),
                   ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(22, 8, 22, 120),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ── Plug image
-                        Center(
-                          child: Container(
-                            width: 200,
-                            height: 180,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: const [BoxShadow(color: Color(0x12000000), blurRadius: 8)],
-                            ),
-                            child: const Icon(Icons.electrical_services, color: AppColors.primaryMid, size: 80),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // ── Scan QR button
-                        OutlinedButton(
-                          onPressed: _scanQRCode,
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: AppColors.primary, width: 1.5),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                            minimumSize: const Size(double.infinity, 48),
-                          ),
-                          child: const Text('Scan QR Code',
-                              style: TextStyle(color: AppColors.primary, fontSize: 15, fontWeight: FontWeight.w500)),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // ── OR divider
-                        Row(children: [
-                          const Expanded(child: Divider(color: AppColors.primary, thickness: 1)),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 10),
-                            child: Text('OR', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13)),
-                          ),
-                          const Expanded(child: Divider(color: AppColors.primary, thickness: 1)),
-                        ]),
-                        const SizedBox(height: 20),
-
-                        // ── Channel Name
-                        const Text('Set Channel Name',
-                            style: TextStyle(color: AppColors.textLight, fontSize: 15, fontWeight: FontWeight.w400)),
-                        const SizedBox(height: 6),
-                        TextField(
-                          controller: _nameCtrl,
-                          style: const TextStyle(color: AppColors.primaryMid, fontSize: 14, fontWeight: FontWeight.w600),
-                          decoration: const InputDecoration(
-                            hintText: 'Migro_CH1',
-                            hintStyle: TextStyle(color: AppColors.grey),
-                            border: UnderlineInputBorder(),
-                            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
-                            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.lightGrey)),
-                            contentPadding: EdgeInsets.symmetric(vertical: 8),
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-
-                        // ── Remember WiFi toggle
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: const [
-                                  Text('Remember WiFi Settings',
-                                      style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w600)),
-                                  SizedBox(height: 2),
-                                  Text('(Saving WiFi settings will make future device setup much easier)',
-                                      style: TextStyle(color: AppColors.textLight, fontSize: 12, height: 1.3)),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Switch(
-                              value: _rememberWifi,
-                              onChanged: (v) => setState(() => _rememberWifi = v),
-                              activeColor: AppColors.primaryDark,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  const Expanded(
+                    child: Text('Add Channel', textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.primaryDark, fontSize: 18, fontWeight: FontWeight.w700)),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 48),
+                ],
+              ),
             ),
-            // ── Bottom nav
-            Positioned(
-              left: 16, right: 16, bottom: 14,
-              child: Row(children: [
-                _navBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-                const SizedBox(width: 10),
-                _navBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
-                const SizedBox(width: 10),
-                _navBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-channels')),
-                const SizedBox(width: 10),
-                _navBtn(Icons.view_in_ar, AppColors.primaryDark, () {}),
-                const SizedBox(width: 10),
-                _navBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
-                const Spacer(),
-                _navBtn(Icons.close, AppColors.red, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-              ]),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.electrical_services, color: AppColors.primaryMid, size: 80),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Scan the QR code on your device to add a new channel.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.textLight, fontSize: 14, height: 1.4),
+                    ),
+                    const SizedBox(height: 32),
+                    if (_loading)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.primary),
+                        ),
+                        child: Row(children: [
+                          const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(_status,
+                              style: const TextStyle(color: AppColors.primary,
+                                  fontSize: 13, fontWeight: FontWeight.w600))),
+                        ]),
+                      )
+                    else
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _startAddChannel,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                          ),
+                          icon: const Icon(Icons.qr_code_scanner, color: Colors.white, size: 22),
+                          label: const Text('Scan QR & Add Channel',
+                              style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _scanQRCode() async {
-    // Request camera permission
-    final status = await Permission.camera.request();
-    
-    if (status.isGranted) {
-      if (!mounted) return;
-      final result = await Navigator.push<String>(
-        context,
-        MaterialPageRoute(builder: (context) => const QRScannerScreen()),
-      );
-      
-      if (result != null && mounted) {
-        setState(() {
-          _nameCtrl.text = result;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('QR Code scanned: $result'), backgroundColor: AppColors.green),
-        );
-      }
-    } else if (status.isDenied || status.isPermanentlyDenied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Camera permission is required to scan QR codes'),
-          backgroundColor: AppColors.red,
-        ),
-      );
-      if (status.isPermanentlyDenied) {
-        openAppSettings();
-      }
-    }
-  }
-
-  void _onNext() {
-    final name = _nameCtrl.text.trim();
-    if (name.isNotEmpty) {
-      Navigator.pushNamed(context, '/add-channel-wifi', arguments: name);
-    }
-  }
-
-  Widget _navBtn(IconData icon, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44, height: 44,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
   }
