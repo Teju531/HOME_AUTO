@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -146,6 +147,24 @@ class AppStore {
   // Allowed device keys for current user in active home (null = full access)
   List<String>? allowedDeviceKeys;
 
+  // Check if current user can control a specific device
+  bool isDeviceAllowed(String channelName, int deviceIndex) {
+    if (allowedDeviceKeys == null) return true; // owner = full access
+    return allowedDeviceKeys!.contains('$channelName|||$deviceIndex');
+  }
+
+  // Returns channels filtered by permission — non-owners only see permitted devices
+  List<ChannelItem> get permittedChannels {
+    if (allowedDeviceKeys == null) return channels.value; // owner sees all
+    return channels.value.map((ch) {
+      final permittedDevices = ch.devices.asMap().entries
+          .where((e) => allowedDeviceKeys!.contains('${ch.name}|||${e.key}'))
+          .map((e) => e.value)
+          .toList();
+      return ch.copyWith(devices: permittedDevices);
+    }).where((ch) => ch.devices.isNotEmpty).toList();
+  }
+
   // ── Connection mode notifier — UI listens to show BLE/WiFi indicator ──────
   final ValueNotifier<bool> isBleConnected = ValueNotifier(false);
 
@@ -199,6 +218,7 @@ class AppStore {
       allowedDeviceKeys = await _fs.loadPermissions(homeId!, uid, ownerUid);
     }
     startScheduleChecker();
+    startMembersListener(); // real-time members updates
   }
 
   // Switch active home
@@ -208,7 +228,57 @@ class AppStore {
     scenes.value = [];
     members.value = [];
     allowedDeviceKeys = null;
+    stopMembersListener();
     await _loadActiveHome();
+  }
+
+  // Real-time members listener
+  StreamSubscription<dynamic>? _membersSubscription;
+
+  void startMembersListener() {
+    _membersSubscription?.cancel();
+    if (homeId == null) return;
+    final listenHomeId = homeId!;
+    _membersSubscription = FirebaseFirestore.instance
+        .collection('homes')
+        .doc(listenHomeId)
+        .snapshots()
+        .listen((snap) async {
+      if (!snap.exists) return;
+      final data = snap.data()!;
+      final uids = List<String>.from(data['members'] ?? []);
+      final ownerUid = (data['ownerUid'] as String?) ?? '';
+      if (uids.isEmpty) {
+        members.value = [];
+        return;
+      }
+      // Fetch all user docs in parallel
+      final userDocs = await Future.wait(
+        uids.map((uid) => FirebaseFirestore.instance.collection('users').doc(uid).get()),
+      );
+      final results = <MemberItem>[];
+      for (var i = 0; i < uids.length; i++) {
+        final uid = uids[i];
+        final docData = userDocs[i].data();
+        final email = (docData?['email'] as String?) ?? '';
+        final rawName = (docData?['displayName'] as String?)?.trim() ?? '';
+        final fallback = email.contains('@') ? email.split('@').first : (email.isNotEmpty ? email : uid);
+        final name = rawName.isNotEmpty ? rawName : fallback;
+        results.add(MemberItem(
+          uid: uid,
+          name: name.isNotEmpty ? name : uid,
+          isOwner: uid == ownerUid,
+        ));
+      }
+      members.value = results;
+    }, onError: (e) {
+      debugPrint('Members listener error: $e');
+    });
+  }
+
+  void stopMembersListener() {
+    _membersSubscription?.cancel();
+    _membersSubscription = null;
   }
 
   Future<void> loadMembers() async {
@@ -216,7 +286,7 @@ class AppStore {
     final raw = await _fs.getHomeMembers(homeId!);
     members.value = raw.map((m) => MemberItem(
       uid: m['uid']!,
-      name: m['name']!,
+      name: m['name']!.isNotEmpty ? m['name']! : m['uid']!,
       isOwner: m['isOwner'] == '1',
     )).toList();
   }
@@ -257,6 +327,42 @@ class AppStore {
     final id = await _fs.createHome(displayName);
     if (id != null) homeId = id;
     return id;
+  }
+
+  // ── Leave a specific home ───────────────────────────────────────────────
+  Future<void> leaveHome({String? targetHomeId}) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final id = targetHomeId ?? homeId;
+    if (uid == null || id == null) return;
+    await _fs.removeMember(id, uid);
+    _clearHomeState(id);
+  }
+
+  // ── Delete a specific home (owner only) ─────────────────────────────────
+  Future<void> deleteHome({String? targetHomeId}) async {
+    final id = targetHomeId ?? homeId;
+    if (id == null) return;
+    await _fs.deleteHome(id);
+    _clearHomeState(id);
+  }
+
+  void _clearHomeState(String removedId) {
+    // Remove from allHomeIds and homeNames first
+    allHomeIds.value = allHomeIds.value.where((id) => id != removedId).toList();
+    final updatedNames = Map<String, String>.from(homeNames.value);
+    updatedNames.remove(removedId);
+    homeNames.value = updatedNames;
+
+    // If the removed home was the active one, clear active state
+    if (homeId == removedId) {
+      homeId = null;
+      channels.value = [];
+      scenes.value = [];
+      members.value = [];
+      allowedDeviceKeys = null;
+      stopScheduleChecker();
+      stopMembersListener();
+    }
   }
 
   // ── Join an existing home ──────────────────────────────────────────────────
@@ -365,6 +471,11 @@ class AppStore {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> toggleDevice(String channelName, int deviceIndex) async {
+    // Check permission
+    if (!isDeviceAllowed(channelName, deviceIndex)) {
+      debugPrint('Permission denied: $channelName|||$deviceIndex');
+      return;
+    }
     final list = List<ChannelItem>.from(channels.value);
     final ci = list.indexWhere((c) => c.name == channelName);
     if (ci == -1) return;

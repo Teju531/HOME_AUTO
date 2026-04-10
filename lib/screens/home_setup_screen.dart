@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -100,6 +101,11 @@ class _HomeSetupScreenState extends State<HomeSetupScreen> {
       return;
     }
     await AppStore.instance.loadFromFirestore();
+    if (!mounted) return;
+    final uid2 = FirebaseAuth.instance.currentUser?.uid;
+    if (uid2 != null) {
+      AppStore.instance.startRealtime(uid2).catchError((_) {});
+    }
     Navigator.pushReplacementNamed(context, '/home');
   }
 
@@ -166,6 +172,10 @@ class _HomeSetupScreenState extends State<HomeSetupScreen> {
             backgroundColor: AppColors.green));
     await AppStore.instance.loadFromFirestore();
     if (!mounted) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      AppStore.instance.startRealtime(uid).catchError((_) {});
+    }
     Navigator.pushReplacementNamed(context, '/home');
   }
 

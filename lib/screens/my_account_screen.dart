@@ -152,16 +152,17 @@ class _MyAccountScreenState extends State<MyAccountScreen> {
   }
 
   Future<void> _leaveHome() async {
-    final uid = _auth.currentUser?.uid;
     final homeId = AppStore.instance.homeId;
-    if (uid == null || homeId == null) return;
-    await FirestoreService.instance.removeMember(homeId, uid);
-    AppStore.instance.homeId = null;
-    AppStore.instance.channels.value = [];
-    AppStore.instance.scenes.value = [];
-    AppStore.instance.members.value = [];
+    if (homeId == null) return;
+    await AppStore.instance.leaveHome(targetHomeId: homeId);
     if (!mounted) return;
-    Navigator.pushNamedAndRemoveUntil(context, '/home-setup', (_) => false);
+    final remaining = AppStore.instance.allHomeIds.value;
+    if (remaining.isNotEmpty) {
+      await AppStore.instance.switchHome(remaining.first);
+      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+    } else {
+      Navigator.pushNamedAndRemoveUntil(context, '/home-setup', (_) => false);
+    }
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────

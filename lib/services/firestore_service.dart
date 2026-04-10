@@ -51,45 +51,65 @@ class FirestoreService {
     final uid = _uid;
     if (uid == null) return _InviteResult.error('Not logged in.');
     try {
+      debugPrint('Redeeming token: ${token.toUpperCase()}');
       final doc = await _db.collection('inviteTokens').doc(token.toUpperCase()).get();
+      debugPrint('Token doc exists: ${doc.exists}');
       if (!doc.exists) return _InviteResult.error('Invalid invite code.');
 
       final data = doc.data()!;
+      debugPrint('Token data: $data');
+
       if (data['used'] == true) {
         return _InviteResult.error('This invite has already been used.');
       }
 
       final expiresAt = (data['expiresAt'] as Timestamp).toDate();
+      debugPrint('Expires at: $expiresAt, now: ${DateTime.now()}');
       if (DateTime.now().isAfter(expiresAt)) {
         return _InviteResult.error('This invite has expired.');
       }
 
       final homeId = data['homeId'] as String;
+      debugPrint('Home ID from token: $homeId');
 
-      final userDoc = await _db.collection('users').doc(uid).get();
-      if (userDoc.data()?['homeId'] == homeId) {
+      // Check if already a member of this home
+      final homeDoc = await _homeDoc(homeId).get();
+      debugPrint('Home doc exists: ${homeDoc.exists}');
+      final members = List<String>.from(homeDoc.data()?['members'] ?? []);
+      debugPrint('Current members: $members, uid: $uid');
+      if (members.contains(uid)) {
         return _InviteResult.error('You are already a member of this home.');
       }
 
       // Mark used and add member
+      debugPrint('Marking token as used...');
       await _db.collection('inviteTokens').doc(token.toUpperCase())
           .update({'used': true});
+      debugPrint('Adding member to home...');
       await _homeDoc(homeId).update({
         'members': FieldValue.arrayUnion([uid]),
       });
+      debugPrint('Updating user doc...');
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final email = currentUser?.email ?? '';
+      final displayName = (currentUser?.displayName?.trim().isNotEmpty == true)
+          ? currentUser!.displayName!
+          : (email.contains('@') ? email.split('@').first : email);
       await _db.collection('users').doc(uid).set(
         {
           'homeId': homeId,
           'homeIds': FieldValue.arrayUnion([homeId]),
-          'email': FirebaseAuth.instance.currentUser?.email,
+          'email': email,
+          'displayName': displayName,
         },
         SetOptions(merge: true),
       );
-
+      debugPrint('Redeem success!');
       return _InviteResult.success(homeId);
-    } catch (e) {
+    } catch (e, stack) {
       debugPrint('Error redeeming invite: $e');
-      return _InviteResult.error('Something went wrong. Try again.');
+      debugPrint('Stack: $stack');
+      return _InviteResult.error('Error: $e');
     }
   }
 
@@ -120,11 +140,17 @@ class FirestoreService {
         'members':     [uid],
         'createdAt':   FieldValue.serverTimestamp(),
       });
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final email = currentUser?.email ?? '';
+      final ownerDisplayName = (currentUser?.displayName?.trim().isNotEmpty == true)
+          ? currentUser!.displayName!
+          : (email.contains('@') ? email.split('@').first : email);
       await _db.collection('users').doc(uid).set(
         {
           'homeId': ref.id,
           'homeIds': FieldValue.arrayUnion([ref.id]),
-          'email': FirebaseAuth.instance.currentUser?.email,
+          'email': email,
+          'displayName': ownerDisplayName,
         },
         SetOptions(merge: true),
       );
@@ -144,11 +170,17 @@ class FirestoreService {
       await _homeDoc(homeId).update({
         'members': FieldValue.arrayUnion([uid]),
       });
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final email = currentUser?.email ?? '';
+      final joinDisplayName = (currentUser?.displayName?.trim().isNotEmpty == true)
+          ? currentUser!.displayName!
+          : (email.contains('@') ? email.split('@').first : email);
       await _db.collection('users').doc(uid).set(
         {
           'homeId': homeId,
           'homeIds': FieldValue.arrayUnion([homeId]),
-          'email': FirebaseAuth.instance.currentUser?.email,
+          'email': email,
+          'displayName': joinDisplayName,
         },
         SetOptions(merge: true),
       );
@@ -240,14 +272,53 @@ class FirestoreService {
       await _homeDoc(homeId).update({
         'members': FieldValue.arrayRemove([memberUid]),
       });
-      await _db.collection('users').doc(memberUid).set(
-        {
-          'homeIds': FieldValue.arrayRemove([homeId]),
-        },
-        SetOptions(merge: true),
-      );
+      // Clear homeId from user doc if it matches this home
+      final userDoc = await _db.collection('users').doc(memberUid).get();
+      final currentHomeId = userDoc.data()?['homeId'] as String?;
+      final update = <String, dynamic>{
+        'homeIds': FieldValue.arrayRemove([homeId]),
+      };
+      if (currentHomeId == homeId) update['homeId'] = FieldValue.delete();
+      await _db.collection('users').doc(memberUid).update(update);
     } catch (e) {
       debugPrint('Error removing member: $e');
+    }
+  }
+
+  /// Deletes the entire home and removes all members from it.
+  Future<void> deleteHome(String homeId) async {
+    try {
+      final homeDoc = await _homeDoc(homeId).get();
+      final members = List<String>.from(homeDoc.data()?['members'] ?? []);
+
+      // Remove homeId from every member's user doc
+      for (final uid in members) {
+        final userDoc = await _db.collection('users').doc(uid).get();
+        final currentHomeId = userDoc.data()?['homeId'] as String?;
+        final update = <String, dynamic>{
+          'homeIds': FieldValue.arrayRemove([homeId]),
+        };
+        if (currentHomeId == homeId) update['homeId'] = FieldValue.delete();
+        await _db.collection('users').doc(uid).update(update);
+      }
+
+      // Delete all sub-collections: channels (+ their devices), scenes, registeredDevices, permissions
+      for (final sub in ['scenes', 'registeredDevices']) {
+        final snap = await _homeDoc(homeId).collection(sub).get();
+        for (final d in snap.docs) await d.reference.delete();
+      }
+      final channelSnap = await _channelsFor(homeId).get();
+      for (final ch in channelSnap.docs) {
+        final devSnap = await ch.reference.collection('devices').get();
+        for (final d in devSnap.docs) await d.reference.delete();
+        await ch.reference.delete();
+      }
+      final permSnap = await _homeDoc(homeId).collection('permissions').get();
+      for (final d in permSnap.docs) await d.reference.delete();
+
+      await _homeDoc(homeId).delete();
+    } catch (e) {
+      debugPrint('Error deleting home: $e');
     }
   }
 
@@ -264,15 +335,18 @@ class FirestoreService {
   }
 
   // Load permissions for a member — returns null if owner (full access)
+  // Returns null also if no permissions set yet (default = full access)
   Future<List<String>?> loadPermissions(String homeId, String memberUid, String ownerUid) async {
     if (memberUid == ownerUid) return null; // owner has full access
     try {
       final doc = await _homeDoc(homeId).collection('permissions').doc(memberUid).get();
-      if (!doc.exists) return []; // no permissions set = no access
-      return List<String>.from(doc.data()?['allowedDeviceKeys'] ?? []);
+      if (!doc.exists) return null; // no permissions set yet = full access by default
+      final keys = List<String>.from(doc.data()?['allowedDeviceKeys'] ?? []);
+      if (keys.isEmpty) return null; // empty permissions = full access
+      return keys;
     } catch (e) {
       debugPrint('Error loading permissions: $e');
-      return [];
+      return null; // on error, default to full access
     }
   }
 

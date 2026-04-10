@@ -83,7 +83,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: 220,
                   height: 90,
                   child: Image.asset(
-                    'assets/logo.jpeg',
+                    'assets/logo.png',
                     fit: BoxFit.contain,
                     filterQuality: FilterQuality.high,
                     errorBuilder: (context, error, stackTrace) => const Icon(

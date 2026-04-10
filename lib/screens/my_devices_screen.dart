@@ -34,8 +34,9 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<List<ChannelItem>>(
       valueListenable: _store.channels,
-      builder: (context, channels, _) {
-        final allDevices = _store.allDevices;
+      builder: (context, _, __) {
+        final channels = _store.permittedChannels;
+        final allDevices = channels.expand((c) => c.devices).toList();
         return Scaffold(
           backgroundColor: AppColors.background,
           bottomNavigationBar: SafeArea(

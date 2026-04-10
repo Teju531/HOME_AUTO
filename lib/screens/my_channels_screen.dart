@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../constants/app_constants.dart';
 import '../models/app_store.dart';
@@ -40,7 +40,9 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
       body: SafeArea(
         child: ValueListenableBuilder<List<ChannelItem>>(
           valueListenable: _store.channels,
-          builder: (context, channels, _) => Stack(
+          builder: (context, _, _x) {
+            final channels = _store.permittedChannels;
+            return Stack(
             children: [
               SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
@@ -67,107 +69,66 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
                     rightValue: channels.length.toString(),
                   ),
                   const SizedBox(height: 20),
-                  // Home switcher (if user has multiple homes)
+                  // Home switcher
                   ValueListenableBuilder<List<String>>(
                     valueListenable: _store.allHomeIds,
                     builder: (context, homeIds, _) {
-                      if (homeIds.length <= 1) return const SizedBox.shrink();
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('My Homes', style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 38,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: homeIds.length,
-                              separatorBuilder: (_, __) => const SizedBox(width: 8),
-                              itemBuilder: (_, i) {
-                                final id = homeIds[i];
-                                final isActive = id == _store.homeId;
-                                final name = _store.homeNames.value[id] ?? id.substring(0, 6);
-                                return GestureDetector(
-                                  onTap: () async {
-                                    if (isActive) return;
-                                    await _store.switchHome(id);
-                                    if (context.mounted) setState(() {});
-                                  },
+                      return ValueListenableBuilder<Map<String, String>>(
+                        valueListenable: _store.homeNames,
+                        builder: (context, names, _) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                const Icon(Icons.home_outlined, color: AppColors.primaryDark, size: 16),
+                                const SizedBox(width: 6),
+                                const Text('My Homes', style: TextStyle(color: AppColors.primaryDark, fontSize: 14, fontWeight: FontWeight.w700)),
+                                const Spacer(),
+                                // Join another home
+                                GestureDetector(
+                                  onTap: _showJoinOptions,
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                     decoration: BoxDecoration(
-                                      color: isActive ? AppColors.primary : Colors.white,
+                                      color: AppColors.primary.withOpacity(0.1),
                                       borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(color: AppColors.primary, width: 1.5),
+                                      border: Border.all(color: AppColors.primary, width: 1),
                                     ),
-                                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                      Icon(Icons.home, size: 14, color: isActive ? Colors.white : AppColors.primary),
-                                      const SizedBox(width: 4),
-                                      Text(name, style: TextStyle(
-                                          color: isActive ? Colors.white : AppColors.primary,
-                                          fontSize: 12, fontWeight: FontWeight.w600)),
+                                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Icon(Icons.add, color: AppColors.primary, size: 13),
+                                      SizedBox(width: 3),
+                                      Text('Join / Add', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
                                     ]),
                                   ),
-                                );
-                              },
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
+                                ),
+                              ]),
+                              const SizedBox(height: 10),
+                              if (homeIds.isEmpty)
+                                const Text('No homes yet.', style: TextStyle(color: AppColors.textLight, fontSize: 12))
+                              else
+                                ...homeIds.map((id) {
+                                  final isActive = id == _store.homeId;
+                                  final name = names[id] ?? id.substring(0, id.length.clamp(0, 8));
+                                  return _HomeRow(
+                                    homeId: id,
+                                    name: name,
+                                    isActive: isActive,
+                                    onSwitch: () async {
+                                      if (isActive) return;
+                                      await _store.switchHome(id);
+                                      if (context.mounted) setState(() {});
+                                    },
+                                    onLeaveOrDelete: () => _showLeaveDeleteDialog(id, name),
+                                  );
+                                }),
+                              const SizedBox(height: 16),
+                            ],
+                          );
+                        },
                       );
                     },
                   ),
-                  // Join another home banner
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECEBFF),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.primary, width: 1.5),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.home_outlined, color: AppColors.primary, size: 26),
-                      const SizedBox(width: 12),
-                      const Expanded(child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Switch / Join Home', style: TextStyle(color: AppColors.primaryDark, fontSize: 13, fontWeight: FontWeight.w700)),
-                          SizedBox(height: 2),
-                          Text('Scan invite QR or enter code', style: TextStyle(color: AppColors.textLight, fontSize: 11)),
-                        ],
-                      )),
-                      GestureDetector(
-                        onTap: _scanAndJoinHome,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.qr_code_scanner, color: Colors.white, size: 14),
-                            SizedBox(width: 4),
-                            Text('Scan QR', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                          ]),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _manualJoinHome,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: AppColors.primary),
-                          ),
-                          child: const Text('Code', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
-                        ),
-                      ),
-                    ]),
-                  ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 4),
                   // Header row
                   Row(children: [
                     const Icon(Icons.grid_view_rounded, color: AppColors.primaryMid, size: 18),
@@ -207,7 +168,8 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
               ),
               // Bottom nav removed - now in bottomNavigationBar
             ],
-          ),
+          );
+          },
         ),
       ),
       bottomNavigationBar: SafeArea(
@@ -344,6 +306,141 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
     );
   }
 
+  void _showJoinOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.lightGrey, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          ListTile(
+            leading: const Icon(Icons.qr_code_scanner, color: AppColors.primary),
+            title: const Text('Scan Invite QR', style: TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+            onTap: () { Navigator.pop(context); _scanAndJoinHome(); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.keyboard, color: AppColors.primary),
+            title: const Text('Enter Invite Code', style: TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+            onTap: () { Navigator.pop(context); _manualJoinHome(); },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  void _showLeaveDeleteDialog(String homeId, String homeName) {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    bool isOwner = false;
+    for (final m in _store.members.value) {
+      if (m.uid == currentUid && m.isOwner) { isOwner = true; break; }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.lightGrey, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(homeName, style: const TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 4),
+          // Both owner and member can leave
+          ListTile(
+            leading: const Icon(Icons.exit_to_app, color: AppColors.orange),
+            title: const Text('Leave Home', style: TextStyle(color: AppColors.orange, fontWeight: FontWeight.w600)),
+            subtitle: const Text('You will be removed from this home'),
+            onTap: () { Navigator.pop(context); _confirmLeaveHome(homeId, homeName); },
+          ),
+          // Only owner can delete
+          if (isOwner)
+            ListTile(
+              leading: const Icon(Icons.delete_forever, color: AppColors.red),
+              title: const Text('Delete Home', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w600)),
+              subtitle: const Text('Permanently removes all members and data'),
+              onTap: () { Navigator.pop(context); _confirmDeleteHome(homeId, homeName); },
+            ),
+          ListTile(
+            leading: const Icon(Icons.close, color: AppColors.textLight),
+            title: const Text('Cancel', style: TextStyle(color: AppColors.textLight)),
+            onTap: () => Navigator.pop(context),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  void _confirmLeaveHome(String homeId, String homeName) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Leave Home', style: TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w700)),
+        content: Text('Leave "$homeName"? You can rejoin later with an invite.', style: const TextStyle(color: AppColors.textLight)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _store.leaveHome(targetHomeId: homeId);
+              if (!mounted) return;
+              final remaining = _store.allHomeIds.value;
+              if (remaining.isNotEmpty) {
+                await _store.switchHome(remaining.first);
+                if (mounted) setState(() {});
+              } else {
+                Navigator.pushNamedAndRemoveUntil(context, '/home-setup', (_) => false);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.orange),
+            child: const Text('Leave', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteHome(String homeId, String homeName) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.red, size: 20),
+          SizedBox(width: 8),
+          Text('Delete Home', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
+        ]),
+        content: Text('Delete "$homeName"? This removes ALL members and data permanently.', style: const TextStyle(color: AppColors.textLight)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _store.deleteHome(targetHomeId: homeId);
+              if (!mounted) return;
+              final remaining = _store.allHomeIds.value;
+              if (remaining.isNotEmpty) {
+                await _store.switchHome(remaining.first);
+                if (mounted) setState(() {});
+              } else {
+                Navigator.pushNamedAndRemoveUntil(context, '/home-setup', (_) => false);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.red),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _scanAndJoinHome() async {
     final camStatus = await Permission.camera.request();
     if (!camStatus.isGranted) {
@@ -409,7 +506,7 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
           SnackBar(content: Text(error), backgroundColor: AppColors.red));
       return;
     }
-    // Reload home names
+    // Reload everything including permissions for the new home
     await _store.loadFromFirestore();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -417,6 +514,82 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
             backgroundColor: AppColors.green));
   }
 }
+
+class _HomeRow extends StatelessWidget {
+  final String homeId;
+  final String name;
+  final bool isActive;
+  final VoidCallback onSwitch;
+  final VoidCallback onLeaveOrDelete;
+
+  const _HomeRow({
+    required this.homeId,
+    required this.name,
+    required this.isActive,
+    required this.onSwitch,
+    required this.onLeaveOrDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isActive ? AppColors.primary.withOpacity(0.08) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isActive ? AppColors.primary : AppColors.lightGrey,
+          width: isActive ? 1.5 : 1,
+        ),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 4)],
+      ),
+      child: Row(children: [
+        Container(
+          width: 36, height: 36,
+          decoration: BoxDecoration(
+            color: isActive ? AppColors.primary : AppColors.primary.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(Icons.home, size: 18, color: isActive ? Colors.white : AppColors.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(name, style: TextStyle(
+              color: isActive ? AppColors.primaryDark : AppColors.textLight,
+              fontSize: 13, fontWeight: FontWeight.w700)),
+          if (isActive)
+            const Text('Active', style: TextStyle(color: AppColors.green, fontSize: 11, fontWeight: FontWeight.w600)),
+        ])),
+        if (!isActive)
+          GestureDetector(
+            onTap: onSwitch,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text('Switch', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: onLeaveOrDelete,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: AppColors.red.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.more_vert, color: AppColors.red, size: 16),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
 
 class _ChannelCard extends StatelessWidget {
   final ChannelItem channel;

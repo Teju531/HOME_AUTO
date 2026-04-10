@@ -18,7 +18,8 @@ class _UsersScreenState extends State<UsersScreen> {
   @override
   void initState() {
     super.initState();
-    _store.loadMembers();
+    // Ensure listener is running (in case screen opened before home loaded)
+    AppStore.instance.startMembersListener();
   }
 
   String _greeting() {
@@ -84,7 +85,11 @@ class _UsersScreenState extends State<UsersScreen> {
                         fontSize: 18, fontWeight: FontWeight.w700)),
                 const Spacer(),
                 GestureDetector(
-                  onTap: () => Navigator.pop(ctx),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    // Reload members after closing invite dialog
+                    _store.loadMembers();
+                  },
                   child: const Icon(Icons.close, color: AppColors.textLight, size: 20),
                 ),
               ]),
@@ -175,6 +180,7 @@ class _UsersScreenState extends State<UsersScreen> {
   void _showMemberOptions(MemberItem member) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     final isSelf = member.uid == currentUid;
+    final isOwner = member.isOwner;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -185,14 +191,34 @@ class _UsersScreenState extends State<UsersScreen> {
             decoration: BoxDecoration(color: AppColors.lightGrey,
                 borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 16),
-        _sheetItem('Permissions to access devices', () {
-          Navigator.pop(context);
-          Navigator.pushNamed(context, '/user-permissions', arguments: member);
-        }),
-        if (!member.isOwner && !isSelf)
+        // Permissions — only owner can manage others, or viewing self
+        if (!isSelf)
+          _sheetItem('Permissions to access devices', () {
+            Navigator.pop(context);
+            Navigator.pushNamed(context, '/user-permissions', arguments: member);
+          }),
+        // Owner viewing their own card → both Leave and Delete
+        if (isSelf && isOwner) ...[
+          _sheetItem('Leave Home', () {
+            Navigator.pop(context);
+            _confirmLeaveHome();
+          }, isDestructive: false, color: AppColors.orange),
+          _sheetItem('Delete Home', () {
+            Navigator.pop(context);
+            _confirmDeleteHome();
+          }, isDestructive: true),
+        ],
+        // Member viewing their own card → Leave only
+        if (isSelf && !isOwner)
+          _sheetItem('Leave Home', () {
+            Navigator.pop(context);
+            _confirmLeaveHome();
+          }, isDestructive: false, color: AppColors.orange),
+        // Owner removing another member
+        if (!isSelf && !member.isOwner)
           _sheetItem('Remove from home', () {
             Navigator.pop(context);
-            _confirmDelete(member);
+            _confirmRemoveMember(member);
           }, isDestructive: true),
         _sheetItem('Cancel', () => Navigator.pop(context)),
         const SizedBox(height: 20),
@@ -200,7 +226,7 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
-  void _confirmDelete(MemberItem member) {
+  void _confirmRemoveMember(MemberItem member) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -225,11 +251,87 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
+  void _confirmLeaveHome() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Leave Home',
+            style: TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w700)),
+        content: const Text(
+          'You will be removed from this home. You can join or create a new one.',
+          style: TextStyle(color: AppColors.textLight),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _store.leaveHome(targetHomeId: _store.homeId);
+              if (!mounted) return;
+              final remaining = _store.allHomeIds.value;
+              if (remaining.isNotEmpty) {
+                await _store.switchHome(remaining.first);
+                if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+              } else {
+                Navigator.pushNamedAndRemoveUntil(context, '/home-setup', (_) => false);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.orange),
+            child: const Text('Leave', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteHome() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.red, size: 22),
+          SizedBox(width: 8),
+          Text('Delete Home',
+              style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
+        ]),
+        content: const Text(
+          'This will permanently delete the home and remove ALL members. This cannot be undone.',
+          style: TextStyle(color: AppColors.textLight),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _store.deleteHome(targetHomeId: _store.homeId);
+              if (!mounted) return;
+              final remaining = _store.allHomeIds.value;
+              if (remaining.isNotEmpty) {
+                await _store.switchHome(remaining.first);
+                if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+              } else {
+                Navigator.pushNamedAndRemoveUntil(context, '/home-setup', (_) => false);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.red),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _sheetItem(String label, VoidCallback onTap,
-      {bool isDestructive = false}) {
+      {bool isDestructive = false, Color? color}) {
     return ListTile(
       title: Text(label, style: TextStyle(
-          color: isDestructive ? AppColors.red : AppColors.primary,
+          color: color ?? (isDestructive ? AppColors.red : AppColors.primary),
           fontSize: 15)),
       onTap: onTap,
     );
@@ -452,7 +554,8 @@ class _UsersScreenState extends State<UsersScreen> {
             CircleAvatar(
               radius: 29,
               backgroundColor: AppColors.primary.withOpacity(0.15),
-              child: Text(member.name[0].toUpperCase(),
+              child: Text(
+                  member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
                   style: const TextStyle(color: AppColors.primary,
                       fontSize: 21, fontWeight: FontWeight.w700)),
             ),

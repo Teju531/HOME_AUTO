@@ -338,7 +338,8 @@ class _HomeScreenState extends State<HomeScreen> {
         bottom: false,
         child: ValueListenableBuilder<List<ChannelItem>>(
           valueListenable: _store.channels,
-          builder: (context, channels, _) {
+          builder: (context, _, __) {
+            final channels = _store.permittedChannels;
             final scenes = _store.scenes.value;
 
             return Stack(children: [

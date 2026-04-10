@@ -99,7 +99,8 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   String? _activeUid;
-  bool _loadingHome = false;
+  bool _initializing = false;
+  bool _navigated = false;
 
   @override
   void dispose() {
@@ -107,57 +108,73 @@ class _AuthWrapperState extends State<AuthWrapper> {
     super.dispose();
   }
 
+  Future<void> _initForUser(String uid) async {
+    // Always reset homeId so loadFromFirestore re-reads from Firestore
+    AppStore.instance.homeId = null;
+
+    await AppStore.instance.loadFromFirestore();
+    if (!mounted || _navigated) return;
+
+    final homeId = AppStore.instance.homeId;
+    if (homeId == null) {
+      _go('/home-setup');
+      return;
+    }
+
+    // Verify user is still a member
+    final memberList = await FirestoreService.instance.getHomeMembers(homeId);
+    if (!mounted || _navigated) return;
+
+    final stillMember = memberList.any((m) => m['uid'] == uid);
+    if (!stillMember) {
+      AppStore.instance.homeId = null;
+      AppStore.instance.channels.value = [];
+      AppStore.instance.scenes.value = [];
+      AppStore.instance.members.value = [];
+      _go('/home-setup');
+      return;
+    }
+
+    _go('/home');
+  }
+
+  void _go(String route) {
+    if (!mounted || _navigated) return;
+    _navigated = true;
+    setState(() => _initializing = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.pushReplacementNamed(context, route);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting || _loadingHome) {
-          return const Scaffold(
-            body: Center(child: _StartupLogoAnimation()),
-          );
+        if (snapshot.connectionState == ConnectionState.waiting || _initializing) {
+          return const Scaffold(body: Center(child: _StartupLogoAnimation()));
         }
+
         if (snapshot.hasData) {
           final uid = snapshot.data!.uid;
           if (_activeUid != uid) {
             _activeUid = uid;
-            _loadingHome = true;
-            AppStore.instance.loadFromFirestore().then((_) async {
-              if (!mounted) return;
-              final homeId = AppStore.instance.homeId;
-              if (homeId == null) {
-                setState(() => _loadingHome = false);
-                Navigator.pushReplacementNamed(context, '/home-setup');
-                return;
-              }
-              // Check if user is still a member of the home
-              final members = await FirestoreService.instance.getHomeMembers(homeId);
-              if (!mounted) return;
-              final uid = FirebaseAuth.instance.currentUser?.uid;
-              final stillMember = members.any((m) => m['uid'] == uid);
-              if (!stillMember) {
-                AppStore.instance.homeId = null;
-                AppStore.instance.channels.value = [];
-                AppStore.instance.scenes.value = [];
-                AppStore.instance.members.value = [];
-                setState(() => _loadingHome = false);
-                Navigator.pushReplacementNamed(context, '/home-setup');
-                return;
-              }
-              setState(() => _loadingHome = false);
-            });
+            _navigated = false;
+            _initializing = true;
+            Future.microtask(() => _initForUser(uid));
             AppStore.instance.startRealtime(uid).catchError((e) {
               debugPrint('Realtime MQTT start failed: $e');
             });
-            // Show loader while fetching
-            return const Scaffold(
-              body: Center(child: _StartupLogoAnimation()),
-            );
           }
-          return const HomeScreen();
+          return const Scaffold(body: Center(child: _StartupLogoAnimation()));
         }
+
+        // Logged out
         if (_activeUid != null) {
           _activeUid = null;
+          _navigated = false;
+          _initializing = false;
           AppStore.instance.homeId = null;
           AppStore.instance.stopRealtime();
           AppStore.instance.stopScheduleChecker();
@@ -213,7 +230,7 @@ class _StartupLogoAnimationState extends State<_StartupLogoAnimation>
               width: 230,
               height: 120,
               child: Image.asset(
-                'assets/logo.jpeg',
+                'assets/logo.png',
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.high,
               ),

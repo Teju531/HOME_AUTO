@@ -124,7 +124,7 @@ class _PageContent extends StatelessWidget {
             width: 200,
             height: 72,
             child: Image.asset(
-              'assets/logo.jpeg',
+              'assets/logo.png',
               fit: BoxFit.contain,
               filterQuality: FilterQuality.high,
               errorBuilder: (context, error, stackTrace) =>
