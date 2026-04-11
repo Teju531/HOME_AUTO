@@ -71,12 +71,25 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _miniBtn(Icons.home_outlined, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
+              _miniBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/my-channels', (_) => false)),
+              _miniBtn(Icons.power_outlined, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/my-devices', (_) => false)),
+              _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/my-scenes', (_) => false)),
+              _miniBtn(Icons.people_outline, AppColors.primary, () => Navigator.pop(context)),
+            ],
+          ),
+        ),
+      ),
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                // ── AppBar
+            // ── AppBar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   child: Row(
@@ -186,25 +199,6 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
                   ),
                 ),
               ],
-            ),
-            // ── Bottom nav
-            Positioned(
-              left: 16, right: 16, bottom: 14,
-              child: Row(children: [
-                _navBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-                const SizedBox(width: 10),
-                _navBtn(Icons.nightlight_round, AppColors.primaryDark, () {}),
-                const SizedBox(width: 10),
-                _navBtn(Icons.grid_view_rounded, AppColors.primaryDark, () {}),
-                const SizedBox(width: 10),
-                _navBtn(Icons.view_in_ar, AppColors.primaryDark, () {}),
-                const SizedBox(width: 10),
-                _navBtn(Icons.people_outline, AppColors.primaryDark, () {}),
-                const Spacer(),
-                _navBtn(Icons.close, AppColors.red, () => Navigator.pop(context)),
-              ]),
-            ),
-          ],
         ),
       ),
     );
@@ -365,13 +359,18 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
     Navigator.pop(context);
   }
 
-  Widget _navBtn(IconData icon, Color color, VoidCallback onTap) {
+  Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
+    final isActive = color == AppColors.primary;
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 44, height: 44,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 26),
       ),
     );
   }

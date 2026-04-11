@@ -40,19 +40,14 @@ class _SignupScreenState extends State<SignupScreen> {
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
       );
-      Navigator.pushReplacementNamed(context, '/home');
+      // AuthWrapper listens to authStateChanges and routes to /home or /home-setup
     } on FirebaseAuthException catch (e) {
       String message = 'Signup failed';
-      if (e.code == 'email-already-in-use') {
-        message = 'Email already in use';
-      } else if (e.code == 'weak-password') {
-        message = 'Password is too weak';
-      } else if (e.code == 'invalid-email') {
-        message = 'Invalid email address';
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      if (e.code == 'email-already-in-use') message = 'Email already in use';
+      if (e.code == 'weak-password') message = 'Password is too weak';
+      if (e.code == 'invalid-email') message = 'Invalid email address';
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 

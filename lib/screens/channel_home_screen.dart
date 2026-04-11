@@ -255,6 +255,7 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
                     const Icon(Icons.power, color: AppColors.primaryDark, size: 18),
                     const SizedBox(width: 6),
                     Expanded(child: Text('Devices in ${ch?.name ?? _channelName}', style: const TextStyle(color: AppColors.primaryDark, fontSize: 16, fontWeight: FontWeight.w700))),
+                    if (_store.allowedDeviceKeys == null)
                     OutlinedButton.icon(
                       onPressed: _showAddDeviceDialog,
                       style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.textPurple, width: 1.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6)),
@@ -288,6 +289,7 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
                       child: _DeviceRow(
                         device: e.value,
                         channelName: ch?.name ?? _channelName,
+                        isOwner: _store.allowedDeviceKeys == null,
                         onToggle: () { _store.toggleDevice(ch?.name ?? _channelName, e.key); setState(() {}); },
                         onDelete: () async {
                           await _store.deleteDevice(ch?.name ?? _channelName, e.value);
@@ -301,9 +303,11 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
               Positioned(left: 16, right: 16, bottom: 14, child: Row(children: [
                 _nb(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false)),
                 const Spacer(),
-                _nb(Icons.add, AppColors.red, _showAddDeviceDialog),
+                if (_store.allowedDeviceKeys == null)
+                  _nb(Icons.add, AppColors.red, _showAddDeviceDialog),
               ])),
-              Positioned(top: 12, right: 70, child: TextButton(onPressed: _showManageSheet, child: const Text('Manage', style: TextStyle(color: AppColors.textPurple)))),
+              if (_store.allowedDeviceKeys == null)
+                Positioned(top: 12, right: 70, child: TextButton(onPressed: _showManageSheet, child: const Text('Manage', style: TextStyle(color: AppColors.textPurple)))),
             ]),
           ),
         );
@@ -344,12 +348,14 @@ class _ChannelHomeScreenState extends State<ChannelHomeScreen> {
 class _DeviceRow extends StatelessWidget {
   final DeviceItem device;
   final String channelName;
+  final bool isOwner;
   final VoidCallback onToggle;
   final VoidCallback onDelete;
   final VoidCallback onRename;
   const _DeviceRow({
     required this.device,
     required this.channelName,
+    required this.isOwner,
     required this.onToggle,
     required this.onDelete,
     required this.onRename,
@@ -357,6 +363,29 @@ class _DeviceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!isOwner) {
+      // Member: no swipe actions, just toggle
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 2))],
+        ),
+        child: Row(children: [
+          Icon(device.icon, color: AppColors.primaryMid, size: 26),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(device.name, style: const TextStyle(color: AppColors.primaryMid, fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(width: 8),
+              PlugTag(device.plug),
+            ]),
+          ])),
+          PowerButton(isOn: device.isOn, onTap: onToggle, size: 44),
+        ]),
+      );
+    }
     return Dismissible(
       key: Key('${device.name}_${device.plug}'),
       background: Container(

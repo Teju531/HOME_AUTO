@@ -29,37 +29,26 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
       );
-      Navigator.pushReplacementNamed(context, '/home');
+      // AuthWrapper listens to authStateChanges and routes to /home or /home-setup
     } on FirebaseAuthException catch (e) {
-      String message = "Login failed";
-      if (e.code == 'user-not-found') {
-        message = "No user found with this email";
-      } else if (e.code == 'wrong-password') {
-        message = "Incorrect password";
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      String message = 'Login failed';
+      if (e.code == 'user-not-found') message = 'No user found with this email';
+      if (e.code == 'wrong-password') message = 'Incorrect password';
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
   Future<void> _googleSignIn() async {
     try {
-      final GoogleSignIn googleSignIn = GoogleSignIn();
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-
-      if (googleUser == null) return; // user cancelled
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        idToken: googleAuth.idToken,
-      );
-
+      final googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) return;
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(idToken: googleAuth.idToken);
       await _auth.signInWithCredential(credential);
-      Navigator.pushReplacementNamed(context, '/home');
+      // AuthWrapper listens to authStateChanges and routes to /home or /home-setup
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Google Sign-In failed: $e')),
       );
@@ -77,7 +66,6 @@ class _LoginScreenState extends State<LoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 8),
-              // Logo
               Center(
                 child: SizedBox(
                   width: 220,
@@ -95,7 +83,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              // AppBar row
               Row(
                 children: [
                   IconButton(
@@ -173,23 +160,21 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 18),
               Row(
                 children: [
-                  // FB button (not implemented)
                   Expanded(
                     child: _socialBtn(
                       'Connect with FB',
                       const Color(0xFF4267B2),
                       Icons.facebook,
-                      () {}, // FB login not implemented
+                      () {},
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // Google button
                   Expanded(
                     child: _socialBtn(
                       'Connect with G+',
                       const Color(0xFF333333),
                       Icons.g_mobiledata,
-                      _googleSignIn, // 👈 connected
+                      _googleSignIn,
                     ),
                   ),
                 ],

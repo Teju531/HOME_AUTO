@@ -28,21 +28,27 @@ class FirestoreService {
   //  INVITE TOKENS
   // ══════════════════════════════════════════════════════════════════════════
 
-  Future<String?> createInviteToken(String homeId) async {
+  Future<String?> createInviteToken(String homeId,
+      {List<String>? allowedDeviceKeys}) async {
     final uid = _uid;
+    debugPrint('createInviteToken: uid=$uid homeId=$homeId');
     if (uid == null) return null;
     try {
       final token = _randomToken();
+      debugPrint('createInviteToken: writing token=$token');
       await _db.collection('inviteTokens').doc(token).set({
-        'homeId':    homeId,
-        'createdBy': uid,
-        'expiresAt': Timestamp.fromDate(
+        'homeId':            homeId,
+        'createdBy':         uid,
+        'expiresAt':         Timestamp.fromDate(
             DateTime.now().add(const Duration(hours: 24))),
-        'used': false,
+        'used':              false,
+        'allowedDeviceKeys': allowedDeviceKeys,
       });
+      debugPrint('createInviteToken: success token=$token');
       return token;
-    } catch (e) {
-      debugPrint('Error creating invite token: $e');
+    } catch (e, stack) {
+      debugPrint('createInviteToken ERROR: $e');
+      debugPrint('createInviteToken STACK: $stack');
       return null;
     }
   }
@@ -72,16 +78,7 @@ class FirestoreService {
       final homeId = data['homeId'] as String;
       debugPrint('Home ID from token: $homeId');
 
-      // Check if already a member of this home
-      final homeDoc = await _homeDoc(homeId).get();
-      debugPrint('Home doc exists: ${homeDoc.exists}');
-      final members = List<String>.from(homeDoc.data()?['members'] ?? []);
-      debugPrint('Current members: $members, uid: $uid');
-      if (members.contains(uid)) {
-        return _InviteResult.error('You are already a member of this home.');
-      }
-
-      // Mark used and add member
+      // Mark token as used and add member atomically
       debugPrint('Marking token as used...');
       await _db.collection('inviteTokens').doc(token.toUpperCase())
           .update({'used': true});
@@ -104,6 +101,17 @@ class FirestoreService {
         },
         SetOptions(merge: true),
       );
+
+      // Apply device permissions if set on the token
+      final rawKeys = data['allowedDeviceKeys'];
+      if (rawKeys != null) {
+        final keys = List<String>.from(rawKeys as List);
+        await _homeDoc(homeId).collection('permissions').doc(uid).set({
+          'allowedDeviceKeys': keys,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
       debugPrint('Redeem success!');
       return _InviteResult.success(homeId);
     } catch (e, stack) {

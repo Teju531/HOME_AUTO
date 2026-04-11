@@ -252,7 +252,6 @@ class AppStore {
         members.value = [];
         return;
       }
-      // Fetch all user docs in parallel
       final userDocs = await Future.wait(
         uids.map((uid) => FirebaseFirestore.instance.collection('users').doc(uid).get()),
       );
@@ -273,6 +272,7 @@ class AppStore {
       members.value = results;
     }, onError: (e) {
       debugPrint('Members listener error: $e');
+      // On error keep whatever we have — don't clear
     });
   }
 
@@ -283,12 +283,39 @@ class AppStore {
 
   Future<void> loadMembers() async {
     if (homeId == null) return;
-    final raw = await _fs.getHomeMembers(homeId!);
-    members.value = raw.map((m) => MemberItem(
-      uid: m['uid']!,
-      name: m['name']!.isNotEmpty ? m['name']! : m['uid']!,
-      isOwner: m['isOwner'] == '1',
-    )).toList();
+    try {
+      final raw = await _fs.getHomeMembers(homeId!);
+      if (raw.isNotEmpty) {
+        members.value = raw.map((m) => MemberItem(
+          uid: m['uid']!,
+          name: m['name']!.isNotEmpty ? m['name']! : m['uid']!,
+          isOwner: m['isOwner'] == '1',
+        )).toList();
+      } else {
+        // Fallback: build from current user only so screen is never blank
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        final email = FirebaseAuth.instance.currentUser?.email ?? '';
+        final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
+        final displayName = (name != null && name.isNotEmpty)
+            ? name
+            : (email.contains('@') ? email.split('@').first : email);
+        if (uid != null) {
+          members.value = [MemberItem(uid: uid, name: displayName.isNotEmpty ? displayName : uid, isOwner: true)];
+        }
+      }
+    } catch (e) {
+      debugPrint('loadMembers error: $e');
+      // Fallback on error
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final email = FirebaseAuth.instance.currentUser?.email ?? '';
+      final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
+      final displayName = (name != null && name.isNotEmpty)
+          ? name
+          : (email.contains('@') ? email.split('@').first : email);
+      if (uid != null) {
+        members.value = [MemberItem(uid: uid, name: displayName.isNotEmpty ? displayName : uid, isOwner: true)];
+      }
+    }
   }
 
   Future<void> removeMember(String memberUid) async {
@@ -308,6 +335,12 @@ class AppStore {
   // ── BLE direct control ───────────────────────────────────────────────────────────
   Future<bool> connectBle(dynamic device) async {
     final ok = await _ble.connect(device);
+    if (ok) {
+      // Sync plug states from current Firestore data so BLE commands are accurate
+      for (final ch in channels.value) {
+        _ble.syncPlugStates(ch.name, ch.devices);
+      }
+    }
     isBleConnected.value = ok;
     return ok;
   }

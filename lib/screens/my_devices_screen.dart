@@ -45,16 +45,11 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _miniBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-                  _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+                  _miniBtn(Icons.home_outlined, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
                   _miniBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-channels')),
-                  _miniBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
                   _miniBtn(Icons.power_outlined, AppColors.primary, () {}),
-                  _miniBtn(Icons.logout, AppColors.red, () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (!mounted) return;
-                    Navigator.pushReplacementNamed(context, '/login');
-                  }),
+                  _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+                  _miniBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
                 ],
               ),
             ),
@@ -290,9 +285,18 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
   }
 
   Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
+    final isActive = color == AppColors.primary;
     return GestureDetector(
       onTap: onTap,
-      child: Icon(icon, color: color, size: 26),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 26),
+      ),
     );
   }
 }

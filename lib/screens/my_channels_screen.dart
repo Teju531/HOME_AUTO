@@ -97,7 +97,7 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
                                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                                       Icon(Icons.add, color: AppColors.primary, size: 13),
                                       SizedBox(width: 3),
-                                      Text('Join / Add', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
+                                      Text('Join', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
                                     ]),
                                   ),
                                 ),
@@ -135,6 +135,7 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
                     const SizedBox(width: 6),
                     const Text('My Channels', style: TextStyle(color: AppColors.primaryMid, fontSize: 17, fontWeight: FontWeight.w700)),
                     const Spacer(),
+                    if (_store.allowedDeviceKeys == null)
                     OutlinedButton.icon(
                       onPressed: () => Navigator.pushNamed(context, '/add-channel-qr'),
                       style: OutlinedButton.styleFrom(
@@ -159,6 +160,7 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
                     itemBuilder: (_, i) => _ChannelCard(
                       channel: channels[i],
                       index: i,
+                      isOwner: _store.allowedDeviceKeys == null,
                       onToggle: () => _store.toggleChannel(i),
                       onManage: () => _showActions(context, channels[i]),
                       onLongPress: () => _showActions(context, channels[i]),
@@ -178,11 +180,11 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _miniBtn(Icons.home, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false)),
-              _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+              _miniBtn(Icons.home_outlined, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false)),
+              _miniBtn(Icons.grid_view_rounded, AppColors.primary, () {}),
               _miniBtn(Icons.power_outlined, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-devices')),
+              _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
               _miniBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
-              _miniBtn(Icons.logout, AppColors.red, () => Navigator.pushReplacementNamed(context, '/login')),
             ],
           ),
         ),
@@ -300,9 +302,18 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
   }
 
   Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
+    final isActive = color == AppColors.primary;
     return GestureDetector(
       onTap: onTap,
-      child: Icon(icon, color: color, size: 26),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 26),
+      ),
     );
   }
 
@@ -332,11 +343,8 @@ class _MyChannelsScreenState extends State<MyChannelsScreen> {
   }
 
   void _showLeaveDeleteDialog(String homeId, String homeName) {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    bool isOwner = false;
-    for (final m in _store.members.value) {
-      if (m.uid == currentUid && m.isOwner) { isOwner = true; break; }
-    }
+    // Owner = has full access (allowedDeviceKeys == null)
+    final isOwner = _store.allowedDeviceKeys == null;
 
     showModalBottomSheet(
       context: context,
@@ -579,10 +587,10 @@ class _HomeRow extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: AppColors.red.withOpacity(0.08),
+              color: AppColors.textLight.withOpacity(0.08),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.more_vert, color: AppColors.red, size: 16),
+            child: const Icon(Icons.more_vert, color: AppColors.textLight, size: 16),
           ),
         ),
       ]),
@@ -594,14 +602,15 @@ class _HomeRow extends StatelessWidget {
 class _ChannelCard extends StatelessWidget {
   final ChannelItem channel;
   final int index;
+  final bool isOwner;
   final VoidCallback onToggle, onManage, onLongPress;
 
-  const _ChannelCard({required this.channel, required this.index, required this.onToggle, required this.onManage, required this.onLongPress});
+  const _ChannelCard({required this.channel, required this.index, required this.isOwner, required this.onToggle, required this.onManage, required this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPress: onLongPress,
+      onLongPress: isOwner ? onLongPress : null,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 6, offset: Offset(0, 2))]),
@@ -620,6 +629,7 @@ class _ChannelCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(channel.devicesLabel, style: const TextStyle(color: AppColors.orange, fontSize: 12, fontWeight: FontWeight.w600)),
           const Spacer(),
+          if (isOwner)
           OutlinedButton(
             onPressed: onManage,
             style: OutlinedButton.styleFrom(

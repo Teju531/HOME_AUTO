@@ -354,9 +354,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(width: 40),
                       const Expanded(
                         child: Center(
-                          child: Text('Home', style: TextStyle(
-                              color: AppColors.primaryMid,
-                              fontSize: 20, fontWeight: FontWeight.w700)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.home_outlined, color: AppColors.primaryMid, size: 22),
+                              SizedBox(width: 6),
+                              Text('Home', style: TextStyle(
+                                  color: AppColors.primaryMid,
+                                  fontSize: 20, fontWeight: FontWeight.w700)),
+                            ],
+                          ),
                         ),
                       ),
                       const ProfileAvatar(),
@@ -388,55 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
 
-                    // Connection mode indicator
-                    ValueListenableBuilder<bool>(
-                      valueListenable: _store.isBleConnected,
-                      builder: (context, bleOn, _) => Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                          color: bleOn
-                              ? AppColors.green.withOpacity(0.1)
-                              : AppColors.primary.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: bleOn ? AppColors.green : AppColors.primary),
-                        ),
-                        child: Row(children: [
-                          Icon(bleOn ? Icons.bluetooth_connected : Icons.wifi,
-                              color: bleOn ? AppColors.green : AppColors.primary,
-                              size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            bleOn
-                                ? 'Local (Bluetooth) - instant control'
-                                : 'Remote (WiFi/MQTT) - cloud control',
-                            style: TextStyle(
-                                color: bleOn ? AppColors.green : AppColors.primary,
-                                fontSize: 12, fontWeight: FontWeight.w600),
-                          ),
-                          const Spacer(),
-                          if (!bleOn)
-                            GestureDetector(
-                              onTap: _connectBleForControl,
-                              child: const Text('Connect BLE',
-                                  style: TextStyle(color: AppColors.primary,
-                                      fontSize: 11, fontWeight: FontWeight.w700)),
-                            ),
-                          if (bleOn)
-                            GestureDetector(
-                              onTap: () async {
-                                await _store.disconnectBle();
-                                setState(() {});
-                              },
-                              child: const Text('Disconnect',
-                                  style: TextStyle(color: AppColors.red,
-                                      fontSize: 11, fontWeight: FontWeight.w700)),
-                            ),
-                        ]),
-                      ),
-                    ),
+                    // Connection mode embedded in channel cards — banner removed
 
                     // Greeting card
                     Container(
@@ -492,7 +451,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       )
                     else
                       SizedBox(
-                        height: 120,
+                        height: 136,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: channels.length,
@@ -518,29 +477,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         () => Navigator.pushNamed(context, '/my-scenes'),
                       )
                     else
-                      Column(children: [
-                        SizedBox(
-                          height: 88,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: scenes.length,
-                            separatorBuilder: (_, __) => const SizedBox(width: 12),
-                            itemBuilder: (_, i) => _sceneChip(scenes[i], i),
-                          ),
+                      SizedBox(
+                        height: 136,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: scenes.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 12),
+                          itemBuilder: (_, i) => _sceneChip(scenes[i], i),
                         ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: () => Navigator.pushNamed(context, '/my-scenes'),
-                          style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: AppColors.primary, width: 1.5),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24)),
-                              minimumSize: const Size(double.infinity, 46)),
-                          icon: const Icon(Icons.add, color: AppColors.primary, size: 20),
-                          label: const Text('Add Scene',
-                              style: TextStyle(color: AppColors.primary, fontSize: 14)),
-                        ),
-                      ]),
+                      ),
                   ],
                 ),
               ),
@@ -554,16 +499,11 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+              _miniBtn(Icons.home_outlined, AppColors.primary, () {}),
               _miniBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-channels')),
-              _miniBtn(Icons.qr_code_scanner, AppColors.primaryMid, _startAddChannel),
               _miniBtn(Icons.power_outlined, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-devices')),
+              _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
               _miniBtn(Icons.people_outline, AppColors.primaryDark, () => Navigator.pushNamed(context, '/users')),
-              _miniBtn(Icons.logout, AppColors.red, () async {
-                await FirebaseAuth.instance.signOut();
-                if (!mounted) return;
-                Navigator.pushReplacementNamed(context, '/login');
-              }),
             ],
           ),
         ),
@@ -597,37 +537,74 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _channelChip(ChannelItem ch) {
     return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, '/channel-home'),
-      child: Container(
-        width: 130,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-            color: const Color(0xFFECEBFF),
-            borderRadius: BorderRadius.circular(16)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.grid_view_rounded, color: AppColors.primaryMid, size: 18),
-            const Spacer(),
-            PowerButton(
-              isOn: ch.isOn,
-              onTap: () async {
-                if (ch.devices.isEmpty) return;
-                for (var i = 0; i < ch.devices.length; i++) {
-                  await _store.toggleDevice(ch.name, i);
-                }
-              },
-              size: 32,
+      onTap: () => Navigator.pushNamed(context, '/my-channels'),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _store.isBleConnected,
+        builder: (context, bleOn, _) => Container(
+          width: 140,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: const Color(0xFFECEBFF),
+              borderRadius: BorderRadius.circular(16)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.grid_view_rounded, color: AppColors.primaryMid, size: 18),
+              const Spacer(),
+              PowerButton(
+                isOn: ch.isOn,
+                onTap: () async {
+                  final idx = _store.channels.value.indexWhere((c) => c.name == ch.name);
+                  if (idx != -1) await _store.toggleChannel(idx);
+                },
+                size: 32,
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Text(ch.name, style: const TextStyle(
+                color: AppColors.primaryMid, fontSize: 13,
+                fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text(ch.devicesLabel, style: const TextStyle(
+                color: AppColors.orange, fontSize: 11,
+                fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            // Connection status pill
+            GestureDetector(
+              onTap: bleOn
+                  ? () async { await _store.disconnectBle(); setState(() {}); }
+                  : _connectBleForControl,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: bleOn
+                      ? AppColors.green.withOpacity(0.12)
+                      : AppColors.primary.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: bleOn ? AppColors.green : AppColors.primary,
+                    width: 1,
+                  ),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                    bleOn ? Icons.bluetooth_connected : Icons.wifi,
+                    size: 10,
+                    color: bleOn ? AppColors.green : AppColors.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    bleOn ? 'BLE' : 'WiFi',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: bleOn ? AppColors.green : AppColors.primary,
+                    ),
+                  ),
+                ]),
+              ),
             ),
           ]),
-          const SizedBox(height: 6),
-          Text(ch.name, style: const TextStyle(
-              color: AppColors.primaryMid, fontSize: 13,
-              fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(ch.devicesLabel, style: const TextStyle(
-              color: AppColors.orange, fontSize: 11,
-              fontWeight: FontWeight.w600)),
-        ]),
+        ),
       ),
     );
   }
@@ -637,24 +614,47 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () => _store.toggleScene(idx),
       child: Container(
-        width: 80,
-        padding: const EdgeInsets.all(8),
+        width: 140,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-            color: scene.isOn
-                ? const Color(0xFFECEBFF) : const Color(0xFFF0F0F0),
-            borderRadius: BorderRadius.circular(14)),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                  shape: BoxShape.circle, color: Colors.white,
-                  border: Border.all(color: c, width: 2)),
-              child: Icon(Icons.power_settings_new, color: c, size: 20)),
-          const SizedBox(height: 4),
+            color: const Color(0xFFECEBFF),
+            borderRadius: BorderRadius.circular(16)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.nightlight_round, color: AppColors.primaryMid, size: 18),
+            const Spacer(),
+            PowerButton(isOn: scene.isOn, onTap: () => _store.toggleScene(idx), size: 32),
+          ]),
+          const SizedBox(height: 6),
           Text(scene.name, style: const TextStyle(
-              color: AppColors.primaryMid, fontSize: 10,
-              fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis),
+              color: AppColors.primaryMid, fontSize: 13,
+              fontWeight: FontWeight.w700),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 4),
+          Text(
+            scene.timerMinutes > 0
+                ? '${scene.timerMinutes} min timer'
+                : scene.hasSchedule
+                    ? 'Scheduled'
+                    : '${scene.deviceCount} device${scene.deviceCount == 1 ? '' : 's'}',
+            style: const TextStyle(
+                color: AppColors.orange, fontSize: 11,
+                fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: c.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: c, width: 1),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.power_settings_new, size: 10, color: c),
+              const SizedBox(width: 4),
+              Text(scene.isOn ? 'ON' : 'OFF',
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: c)),
+            ]),
+          ),
         ]),
       ),
     );
@@ -710,9 +710,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
+    final isActive = color == AppColors.primary;
     return GestureDetector(
       onTap: onTap,
-      child: Icon(icon, color: color, size: 26),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 26),
+      ),
     );
   }
 

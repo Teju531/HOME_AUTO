@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import '../models/app_store.dart';
 
 class BleControlService {
   BleControlService._();
@@ -89,6 +90,17 @@ class BleControlService {
     try { await _device?.disconnect(); } catch (_) {}
     _device = null;
     _char   = null;
+  }
+
+  // Initialize plug states from known device states (call after connect)
+  void syncPlugStates(String channelName, List<DeviceItem> devices) {
+    final states = List<bool>.filled(4, false);
+    for (final d in devices) {
+      final idx = _plugIndex(d.plug);
+      if (idx >= 0 && idx < 4) states[idx] = d.isOn;
+    }
+    _plugStates[channelName] = states;
+    debugPrint('BLE plugStates synced for $channelName: $states');
   }
 
   // ── Send plug command — builds *XXXX# string ──────────────────────────────

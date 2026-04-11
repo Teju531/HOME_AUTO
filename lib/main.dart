@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/app_store.dart';
 import 'constants/app_constants.dart';
-import 'services/firestore_service.dart';
 
 import 'screens/onboarding_screen.dart';
 import 'screens/login_screen.dart';
@@ -109,7 +108,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   Future<void> _initForUser(String uid) async {
-    // Always reset homeId so loadFromFirestore re-reads from Firestore
+    // Reset so loadFromFirestore always re-reads from Firestore fresh
     AppStore.instance.homeId = null;
 
     await AppStore.instance.loadFromFirestore();
@@ -117,20 +116,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     final homeId = AppStore.instance.homeId;
     if (homeId == null) {
-      _go('/home-setup');
-      return;
-    }
-
-    // Verify user is still a member
-    final memberList = await FirestoreService.instance.getHomeMembers(homeId);
-    if (!mounted || _navigated) return;
-
-    final stillMember = memberList.any((m) => m['uid'] == uid);
-    if (!stillMember) {
-      AppStore.instance.homeId = null;
-      AppStore.instance.channels.value = [];
-      AppStore.instance.scenes.value = [];
-      AppStore.instance.members.value = [];
       _go('/home-setup');
       return;
     }

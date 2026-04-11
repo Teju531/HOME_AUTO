@@ -14,12 +14,42 @@ class UsersScreen extends StatefulWidget {
 
 class _UsersScreenState extends State<UsersScreen> {
   final _store = AppStore.instance;
+  bool _loadingMembers = false;
 
   @override
   void initState() {
     super.initState();
-    // Ensure listener is running (in case screen opened before home loaded)
-    AppStore.instance.startMembersListener();
+    _forceLoadMembers();
+  }
+
+  Future<void> _forceLoadMembers() async {
+    setState(() => _loadingMembers = true);
+
+    // Always try Firestore first
+    await _store.loadMembers();
+
+    // If still empty, show at least the current user
+    if (_store.members.value.isEmpty) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final email = user.email ?? '';
+        final rawName = user.displayName?.trim() ?? '';
+        final name = rawName.isNotEmpty
+            ? rawName
+            : (email.contains('@') ? email.split('@').first : email);
+        // isOwner = true only if they have full access (allowedDeviceKeys == null)
+        _store.members.value = [
+          MemberItem(
+            uid: user.uid,
+            name: name.isNotEmpty ? name : user.uid,
+            isOwner: _store.allowedDeviceKeys == null,
+          )
+        ];
+      }
+    }
+
+    if (mounted) setState(() => _loadingMembers = false);
+    _store.startMembersListener();
   }
 
   String _greeting() {
@@ -40,7 +70,7 @@ class _UsersScreenState extends State<UsersScreen> {
     return local.isEmpty ? 'User' : local[0].toUpperCase() + local.substring(1);
   }
 
-  // ── Generate invite token and show QR ──────────────────────────────────────
+  // ── Ask device permissions then generate invite QR ─────────────────────
   Future<void> _showInviteQR() async {
     final homeId = _store.homeId;
     if (homeId == null) {
@@ -49,13 +79,124 @@ class _UsersScreenState extends State<UsersScreen> {
       return;
     }
 
+    // Step 1: Ask which devices the new member can access
+    final channels = _store.channels.value;
+    if (channels.isEmpty) {
+      // No devices yet — skip permission step, give full access
+      await _generateAndShowQR(homeId, null);
+      return;
+    }
+
+    // Build device list for selection
+    final allDeviceKeys = <String>[];
+    final allDeviceLabels = <String>[];
+    for (final ch in channels) {
+      for (var i = 0; i < ch.devices.length; i++) {
+        allDeviceKeys.add('${ch.name}|||$i');
+        allDeviceLabels.add('${ch.name} — ${ch.devices[i].name}');
+      }
+    }
+
+    if (allDeviceKeys.isEmpty) {
+      await _generateAndShowQR(homeId, null);
+      return;
+    }
+
+    // Show permission picker dialog
+    final selected = List<bool>.filled(allDeviceKeys.length, true);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(children: [
+            Icon(Icons.security, color: AppColors.primary, size: 20),
+            SizedBox(width: 8),
+            Text('Device Permissions',
+                style: TextStyle(color: AppColors.primaryDark,
+                    fontSize: 16, fontWeight: FontWeight.w700)),
+          ]),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Choose which devices this member can control:',
+                    style: TextStyle(color: AppColors.textLight, fontSize: 12)),
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: allDeviceKeys.length,
+                    itemBuilder: (_, i) => CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      activeColor: AppColors.primary,
+                      title: Text(allDeviceLabels[i],
+                          style: const TextStyle(
+                              color: AppColors.primaryDark, fontSize: 13)),
+                      value: selected[i],
+                      onChanged: (v) => setS(() => selected[i] = v ?? true),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(children: [
+                  TextButton(
+                    onPressed: () => setS(() {
+                      for (var i = 0; i < selected.length; i++) selected[i] = true;
+                    }),
+                    child: const Text('All', style: TextStyle(fontSize: 12)),
+                  ),
+                  TextButton(
+                    onPressed: () => setS(() {
+                      for (var i = 0; i < selected.length; i++) selected[i] = false;
+                    }),
+                    child: const Text('None', style: TextStyle(fontSize: 12)),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              child: const Text('Generate QR',
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Build allowed keys list (null = full access if all selected)
+    final allSelected = selected.every((v) => v);
+    final allowedKeys = allSelected
+        ? null
+        : [for (var i = 0; i < allDeviceKeys.length; i++) if (selected[i]) allDeviceKeys[i]];
+
+    await _generateAndShowQR(homeId, allowedKeys);
+  }
+
+  Future<void> _generateAndShowQR(String homeId, List<String>? allowedKeys) async {
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
-    final token = await FirestoreService.instance.createInviteToken(homeId);
+    // Store permissions in Firestore keyed to the token so they apply on redeem
+    final token = await FirestoreService.instance.createInviteToken(
+        homeId, allowedDeviceKeys: allowedKeys);
     if (!mounted) return;
     Navigator.pop(context);
 
@@ -67,7 +208,6 @@ class _UsersScreenState extends State<UsersScreen> {
     }
 
     final qrData = 'INVITE:$token';
-
     showDialog<void>(
       context: context,
       builder: (ctx) => Dialog(
@@ -85,21 +225,48 @@ class _UsersScreenState extends State<UsersScreen> {
                         fontSize: 18, fontWeight: FontWeight.w700)),
                 const Spacer(),
                 GestureDetector(
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    // Reload members after closing invite dialog
-                    _store.loadMembers();
-                  },
+                  onTap: () => Navigator.pop(ctx),
                   child: const Icon(Icons.close, color: AppColors.textLight, size: 20),
                 ),
               ]),
               const SizedBox(height: 8),
               const Text(
-                'Ask the family member to open the app → Home Setup → "Join with QR" and scan this code.',
+                'Ask the family member to scan this code in the app.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textLight, fontSize: 12, height: 1.4),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+              if (allowedKeys != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.lock_outline, color: AppColors.green, size: 14),
+                    const SizedBox(width: 6),
+                    Text('Access to ${allowedKeys.length} device(s)',
+                        style: const TextStyle(color: AppColors.green,
+                            fontSize: 11, fontWeight: FontWeight.w600)),
+                  ]),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.lock_open, color: AppColors.primary, size: 14),
+                    SizedBox(width: 6),
+                    Text('Full access to all devices',
+                        style: TextStyle(color: AppColors.primary,
+                            fontSize: 11, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -114,19 +281,13 @@ class _UsersScreenState extends State<UsersScreen> {
                   size: 200,
                   backgroundColor: Colors.white,
                   eyeStyle: const QrEyeStyle(
-                    eyeShape: QrEyeShape.square,
-                    color: AppColors.primaryDark,
-                  ),
+                      eyeShape: QrEyeShape.square, color: AppColors.primaryDark),
                   dataModuleStyle: const QrDataModuleStyle(
-                    dataModuleShape: QrDataModuleShape.square,
-                    color: AppColors.primaryDark,
-                  ),
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: AppColors.primaryDark),
                 ),
               ),
-              const SizedBox(height: 16),
-              const Text('Or share this code manually:',
-                  style: TextStyle(color: AppColors.textLight, fontSize: 11)),
-              const SizedBox(height: 6),
+              const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
@@ -138,10 +299,8 @@ class _UsersScreenState extends State<UsersScreen> {
                     child: Text(token,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            color: AppColors.primaryMid,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 4)),
+                            color: AppColors.primaryMid, fontSize: 20,
+                            fontWeight: FontWeight.w700, letterSpacing: 4)),
                   ),
                   IconButton(
                     icon: const Icon(Icons.copy, color: AppColors.primary, size: 20),
@@ -150,26 +309,19 @@ class _UsersScreenState extends State<UsersScreen> {
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: token));
                       ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(content: Text('Code copied to clipboard!')));
+                          const SnackBar(content: Text('Code copied!')));
                     },
                   ),
                 ]),
               ),
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.access_time, color: AppColors.orange, size: 14),
-                  SizedBox(width: 6),
-                  Text('Expires in 24 hours · One use only',
-                      style: TextStyle(color: AppColors.orange,
-                          fontSize: 11, fontWeight: FontWeight.w600)),
-                ]),
-              ),
+              const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.access_time, color: AppColors.orange, size: 13),
+                SizedBox(width: 4),
+                Text('Expires in 24 hours · One use only',
+                    style: TextStyle(color: AppColors.orange,
+                        fontSize: 11, fontWeight: FontWeight.w600)),
+              ]),
             ],
           ),
         ),
@@ -350,16 +502,11 @@ class _UsersScreenState extends State<UsersScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _miniBtn(Icons.home, '/home', false, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
-                  _miniBtn(Icons.nightlight_round, '/my-scenes', false, () => Navigator.pushNamed(context, '/my-scenes')),
-                  _miniBtn(Icons.grid_view_rounded, '/my-channels', false, () => Navigator.pushNamed(context, '/my-channels')),
-                  _miniBtn(Icons.power_outlined, '/my-devices', false, () => Navigator.pushNamed(context, '/my-devices')),
-                  _miniBtn(Icons.people_outline, '/users', true, () {}),
-                  _miniBtn(Icons.logout, '', false, () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (!mounted) return;
-                    Navigator.pushReplacementNamed(context, '/login');
-                  }),
+                  _miniBtn(Icons.home_outlined, AppColors.primaryDark, () => Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false)),
+                  _miniBtn(Icons.grid_view_rounded, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-channels')),
+                  _miniBtn(Icons.power_outlined, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-devices')),
+                  _miniBtn(Icons.nightlight_round, AppColors.primaryDark, () => Navigator.pushNamed(context, '/my-scenes')),
+                  _miniBtn(Icons.people_outline, AppColors.primary, () {}),
                 ],
               ),
             ),
@@ -379,9 +526,17 @@ class _UsersScreenState extends State<UsersScreen> {
                           onPressed: () => Navigator.pop(context),
                         ),
                         const Expanded(
-                          child: Text('Users', textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.primaryDark,
-                                  fontSize: 18, fontWeight: FontWeight.w700)),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.people_outline, color: AppColors.primaryDark, size: 22),
+                              SizedBox(width: 6),
+                              Text('Users', textAlign: TextAlign.center,
+                                  style: TextStyle(color: AppColors.primaryDark,
+                                      fontSize: 18, fontWeight: FontWeight.w700)),
+                            ],
+                          ),
                         ),
                         GestureDetector(
                           onTap: () => Navigator.pushNamed(context, '/my-account'),
@@ -513,6 +668,32 @@ class _UsersScreenState extends State<UsersScreen> {
                             const SizedBox(height: 16),
 
                             // ── Members grid
+                            if (_loadingMembers)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 24),
+                                child: Center(child: CircularProgressIndicator()),
+                              )
+                            else if (members.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 24),
+                                child: Center(
+                                  child: Column(children: [
+                                    const Text('Could not load members.',
+                                        style: TextStyle(color: AppColors.textLight, fontSize: 13)),
+                                    const SizedBox(height: 12),
+                                    OutlinedButton.icon(
+                                      onPressed: _forceLoadMembers,
+                                      icon: const Icon(Icons.refresh, size: 16),
+                                      label: const Text('Retry'),
+                                      style: OutlinedButton.styleFrom(
+                                        side: const BorderSide(color: AppColors.primary),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                      ),
+                                    ),
+                                  ]),
+                                ),
+                              )
+                            else
                             GridView.builder(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
@@ -576,9 +757,6 @@ class _UsersScreenState extends State<UsersScreen> {
             style: const TextStyle(color: AppColors.primaryDark,
                 fontSize: 13, fontWeight: FontWeight.w700),
             maxLines: 1, overflow: TextOverflow.ellipsis),
-        if (member.isOwner)
-          const Text('Owner',
-              style: TextStyle(color: AppColors.primary, fontSize: 10)),
         const SizedBox(height: 6),
         OutlinedButton(
           onPressed: () => _showMemberOptions(member),
@@ -603,21 +781,18 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
-  Widget _miniBtn(IconData icon, String route, bool isActive, VoidCallback onTap) {
+  Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) {
+    final isActive = color == AppColors.primary;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(6),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: isActive ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(
-          icon,
-          color: isActive ? AppColors.primary : AppColors.primaryDark,
-          size: isActive ? 28 : 24,
-        ),
+        child: Icon(icon, color: color, size: 26),
       ),
     );
   }

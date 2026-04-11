@@ -78,7 +78,10 @@ class MqttService {
       c.onDisconnected = _onDisconnected;
       c.onConnected = _onConnected;
       c.onAutoReconnect = () => debugPrint('MQTT auto reconnecting');
-      c.onAutoReconnected = () { debugPrint('MQTT auto reconnected'); _subscribeTopics(); };
+      c.onAutoReconnected = () {
+        debugPrint('MQTT auto reconnected');
+        _subscribeTopics();
+      };
       c.connectionMessage = MqttConnectMessage()
           .withClientIdentifier(clientId)
           .startClean()
@@ -248,8 +251,4 @@ class MqttService {
 
   void _onConnected() => debugPrint('MQTT connected callback fired');
   void _onDisconnected() => debugPrint('MQTT disconnected, state=${_client?.connectionStatus?.state}');
-  void _onAutoReconnected() {
-    debugPrint('MQTT auto reconnected');
-    _subscribeTopics();
-  }
 }
